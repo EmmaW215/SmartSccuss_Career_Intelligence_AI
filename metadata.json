@@ -1,0 +1,7 @@
+{
+  "name": "SmartSuccess.AI",
+  "description": "AI career evaluation platform for AI engineering, architecture, and product management interviews.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
