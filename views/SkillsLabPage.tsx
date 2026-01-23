@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Beaker, ChevronLeft, ArrowRight, Code2, Cpu, BrainCircuit, CheckCircle2, Home, Search, Filter } from 'lucide-react';
+import { Beaker, ChevronLeft, ArrowRight, Code2, Cpu, BrainCircuit, CheckCircle2, Home, Search, Filter, Lock } from 'lucide-react';
 import SimpleVisitorCounter from '../components/SimpleVisitorCounter';
+import { useAuth } from '../contexts/AuthContext';
 
 interface SkillsLabPageProps {
   onBackToHome: () => void;
@@ -48,8 +49,28 @@ const CHALLENGES = [
 export const SkillsLabPage: React.FC<SkillsLabPageProps> = ({ onBackToHome }) => {
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [submissionStatus, setSubmissionStatus] = useState<'idle' | 'submitting' | 'done'>('idle');
+  const { isAuthenticated, isPro, triggerLogin, triggerUpgrade } = useAuth();
+
+  const handleTaskAction = (taskId: string) => {
+    if (!isAuthenticated) {
+        triggerLogin();
+    } else if (!isPro) {
+        triggerUpgrade();
+    } else {
+        setSelectedTask(taskId);
+    }
+  };
 
   const handleSubmit = () => {
+    if (!isAuthenticated) {
+        triggerLogin();
+        return;
+    }
+    if (!isPro) {
+        triggerUpgrade();
+        return;
+    }
+
     setSubmissionStatus('submitting');
     setTimeout(() => {
       setSubmissionStatus('done');
@@ -146,7 +167,7 @@ export const SkillsLabPage: React.FC<SkillsLabPageProps> = ({ onBackToHome }) =>
                     {challenge.reward}
                   </div>
                   <button 
-                    onClick={() => setSelectedTask(challenge.id)}
+                    onClick={() => handleTaskAction(challenge.id)}
                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
                       selectedTask === challenge.id 
                       ? 'bg-purple-600 text-white' 
@@ -154,7 +175,8 @@ export const SkillsLabPage: React.FC<SkillsLabPageProps> = ({ onBackToHome }) =>
                     }`}
                   >
                     {selectedTask === challenge.id ? 'Task Active' : 'Select Challenge'} 
-                    <ArrowRight size={14} />
+                    {(!isPro) && <Lock size={12} />}
+                    {isPro && <ArrowRight size={14} />}
                   </button>
                 </div>
               </div>

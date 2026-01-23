@@ -1,5 +1,6 @@
 import React from 'react';
 import { ArrowRight, CheckCircle2, FileText, ChevronLeft, ExternalLink } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 interface DemoPageProps {
     onBack: () => void;
@@ -7,6 +8,27 @@ interface DemoPageProps {
 }
 
 export const DemoPage: React.FC<DemoPageProps> = ({ onBack, onViewSample }) => {
+  const { isAuthenticated, isPro, triggerLogin, triggerUpgrade } = useAuth();
+
+  const handleTryLive = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!isAuthenticated) {
+      triggerLogin();
+    } else if (!isPro) {
+      triggerUpgrade();
+    } else {
+      window.open("https://matchwise-ai.vercel.app/", "_blank");
+    }
+  };
+
+  const handleViewSample = () => {
+    if (!isAuthenticated) {
+      triggerLogin();
+    } else {
+      onViewSample();
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto bg-white">
       <div className="max-w-6xl mx-auto p-8">
@@ -40,16 +62,14 @@ export const DemoPage: React.FC<DemoPageProps> = ({ onBack, onViewSample }) => {
                 </ul>
 
                 <div className="flex gap-4 pt-4">
-                    <a 
-                        href="https://matchwise-ai.vercel.app/" 
-                        target="_blank" 
-                        rel="noreferrer"
+                    <button 
+                        onClick={handleTryLive}
                         className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-gray-900 text-white font-semibold rounded-xl hover:bg-gray-800 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                     >
                         Try MatchWise Live <ExternalLink size={16} />
-                    </a>
+                    </button>
                     <button 
-                        onClick={onViewSample}
+                        onClick={handleViewSample}
                         className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-white border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-all"
                     >
                         View Sample Analysis

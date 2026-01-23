@@ -4,7 +4,8 @@ import {
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, LineChart, Line
 } from 'recharts';
 import { ChartDataPoint, PerformanceData } from '../types';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, Download } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 interface DashboardPageProps {
     onBack: () => void;
@@ -28,17 +29,35 @@ const performanceData: PerformanceData[] = [
 ];
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({ onBack }) => {
+  const { isAuthenticated, triggerLogin } = useAuth();
+
+  const handleDownloadReport = () => {
+    if (!isAuthenticated) {
+        triggerLogin();
+    } else {
+        alert("Report downloading...");
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto bg-gray-50/50 p-8">
       {/* Header */}
-      <div className="flex items-center gap-4 mb-8">
-        <button onClick={onBack} className="p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600">
-            <ChevronLeft size={20} />
-        </button>
-        <div>
-            <h1 className="text-2xl font-bold text-gray-800">Your Analytics Dashboard</h1>
-            <p className="text-sm text-gray-500">Track your interview performance and AI success metrics.</p>
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-4">
+            <button onClick={onBack} className="p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600">
+                <ChevronLeft size={20} />
+            </button>
+            <div>
+                <h1 className="text-2xl font-bold text-gray-800">Your Analytics Dashboard</h1>
+                <p className="text-sm text-gray-500">Track your interview performance and AI success metrics.</p>
+            </div>
         </div>
+        <button 
+            onClick={handleDownloadReport}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 text-sm font-medium"
+        >
+            <Download size={16} /> Export Report
+        </button>
       </div>
 
       {/* KPI Cards */}

@@ -1,11 +1,22 @@
 import React from 'react';
 import { ChevronLeft, CheckCircle2, AlertCircle, FileText, Briefcase, Award, ArrowRight, Zap } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 interface SampleAnalysisPageProps {
   onBack: () => void;
 }
 
 export const SampleAnalysisPage: React.FC<SampleAnalysisPageProps> = ({ onBack }) => {
+  const { isAuthenticated, triggerLogin } = useAuth();
+  
+  const handleStartAnalysis = () => {
+    if (!isAuthenticated) {
+        triggerLogin();
+    } else {
+        onBack(); // Go back to Demo page (or eventually a real analysis page)
+    }
+  };
+
   // Sample demo data
   const demoData = {
     job_summary: {
@@ -82,7 +93,7 @@ Best regards,
             </div>
           </div>
           <button 
-            onClick={onBack}
+            onClick={handleStartAnalysis}
             className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition shadow-sm font-medium flex items-center gap-2"
           >
             Try Your Resume <ArrowRight size={16} />
@@ -276,7 +287,7 @@ Best regards,
 
           <div className="flex justify-center pt-8 pb-12">
             <button 
-                onClick={onBack}
+                onClick={handleStartAnalysis}
                 className="px-8 py-4 bg-gray-900 text-white text-lg font-bold rounded-xl shadow-xl hover:bg-gray-800 hover:-translate-y-1 transition-all flex items-center gap-3"
             >
                 Start Your Own Analysis <ArrowRight size={20} />

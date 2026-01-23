@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, RefreshCw, Send, Play, Square, AlertCircle, Bot, LogIn } from 'lucide-react';
+import { Mic, MicOff, RefreshCw, Send, Play, Square, AlertCircle, Bot, LogIn, Lock } from 'lucide-react';
 import { InterviewType, Message } from '../types';
 import SimpleVisitorCounter from '../components/SimpleVisitorCounter';
 import { generateInterviewResponse } from '../services/geminiService';
@@ -18,15 +18,16 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
   const [isSpeaking, setIsSpeaking] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  const { user, login, isAuthenticated, isLoading } = useAuth();
+  const { user, login, isAuthenticated, isLoading, isPro, triggerLogin, triggerUpgrade } = useAuth();
 
   // Initial Greeting
   useEffect(() => {
+    const userName = user?.name ? user.name.split(' ')[0] : 'Guest';
     setMessages([
       {
         id: 'init',
         role: 'ai',
-        content: `Hello ${user?.name.split(' ')[0]}! I am your SmartSuccess AI coach. I'm ready to conduct your ${interviewType}. Shall we begin?`,
+        content: `Hello ${userName}! I am your SmartSuccess AI coach. I'm ready to conduct your ${interviewType}. Shall we begin?`,
         timestamp: new Date()
       }
     ]);
@@ -37,7 +38,16 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const checkAccess = () => {
+    if (!isAuthenticated) {
+        triggerLogin();
+        return false;
+    }
+    return true;
+  };
+
   const handleSend = async () => {
+    if (!checkAccess()) return;
     if (!input.trim()) return;
 
     const userMsg: Message = {
@@ -79,6 +89,14 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
 
   // Mock Speech-to-Text
   const toggleRecording = () => {
+    if (!checkAccess()) return;
+
+    // Special check for Customize Interview + Voice Input
+    if (interviewType === InterviewType.CUSTOMIZE && !isPro) {
+        triggerUpgrade();
+        return;
+    }
+
     if (isRecording) {
       setIsRecording(false);
       if (!input) setInput("I have extensive experience building RAG pipelines using Python and Pinecone.");
@@ -89,6 +107,8 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
 
   // Mock Text-to-Speech
   const speak = (text: string) => {
+    if (!checkAccess()) return;
+
     if ('speechSynthesis' in window) {
       setIsSpeaking(true);
       const utterance = new SpeechSynthesisUtterance(text);
@@ -98,12 +118,18 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
   };
 
   const handlePracticeAgain = () => {
+    if (!checkAccess()) return;
     setMessages([{
         id: Date.now().toString(),
         role: 'ai',
         content: `Resetting session... Let's start the ${interviewType} again. Please introduce yourself.`,
         timestamp: new Date()
     }]);
+  };
+
+  const handleNavigateToAnalytics = () => {
+    if (!checkAccess()) return;
+    onNavigateToDashboard();
   };
 
   return (
@@ -120,7 +146,7 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
         <div className="flex items-center gap-4">
           <SimpleVisitorCounter />
           <button 
-            onClick={onNavigateToDashboard}
+            onClick={handleNavigateToAnalytics}
             className="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors"
           >
             View Analytics
@@ -217,14 +243,17 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
                 className={`p-3 rounded-full transition-all duration-300 shadow-md ${
                     isRecording 
                     ? 'bg-red-500 text-white animate-pulse ring-4 ring-red-100' 
-                    : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                    : interviewType === InterviewType.CUSTOMIZE && !isPro
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200'
+                      : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
                 }`}
             >
                 {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
             </button>
         </div>
-        <div className="text-center mt-2 text-xs text-gray-400">
-            {isRecording ? "Listening..." : "Press microphone to speak"}
+        <div className="text-center mt-2 text-xs text-gray-400 flex items-center justify-center gap-1">
+            {interviewType === InterviewType.CUSTOMIZE && !isPro && <Lock size={10} />}
+            {isRecording ? "Listening..." : interviewType === InterviewType.CUSTOMIZE && !isPro ? "Voice input: Pro Only" : "Press microphone to speak"}
         </div>
       </div>
     </div>

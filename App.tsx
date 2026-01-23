@@ -8,6 +8,7 @@ import { DemoPage } from './views/DemoPage';
 import { SkillsLabPage } from './views/SkillsLabPage';
 import { SampleAnalysisPage } from './views/SampleAnalysisPage';
 import { AuthProvider } from './contexts/AuthContext';
+import { AccessModals } from './components/AccessModals';
 
 function AppContent() {
   const [currentView, setCurrentView] = useState<ViewState>('landing');
@@ -35,6 +36,7 @@ function AppContent() {
   // Inner App Layout
   return (
     <div className="flex h-screen w-full bg-gray-50 overflow-hidden font-sans">
+      <AccessModals />
       <Sidebar 
         currentView={currentView}
         onNavigate={handleNavigate}
