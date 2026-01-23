@@ -21,6 +21,27 @@ export interface Message {
   role: 'user' | 'ai';
   content: string;
   timestamp: Date;
+  evaluation?: {
+    score?: number;
+    feedback?: string;
+    strengths?: string[];
+    improvements?: string[];
+    star_scores?: {
+      situation?: number;
+      task?: number;
+      action?: number;
+      result?: number;
+    };
+    technical_scores?: {
+      technical_accuracy?: number;
+      depth_of_knowledge?: number;
+      practical_experience?: number;
+      system_thinking?: number;
+      communication_clarity?: number;
+    };
+  };
+  questionNumber?: number;
+  totalQuestions?: number;
 }
 
 export interface InterviewSession {
