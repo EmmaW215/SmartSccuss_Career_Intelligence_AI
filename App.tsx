@@ -9,6 +9,7 @@ import { SkillsLabPage } from './views/SkillsLabPage';
 import { SampleAnalysisPage } from './views/SampleAnalysisPage';
 import { AuthProvider } from './contexts/AuthContext';
 import { AccessModals } from './components/AccessModals';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 
 function AppContent() {
   const [currentView, setCurrentView] = useState<ViewState>('landing');
@@ -82,6 +83,7 @@ function App() {
   return (
     <AuthProvider>
       <AppContent />
+      <SpeedInsights />
     </AuthProvider>
   );
 }
