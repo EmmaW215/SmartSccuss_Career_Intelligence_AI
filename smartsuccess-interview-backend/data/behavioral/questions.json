@@ -1,0 +1,248 @@
+{
+  "category": "behavioral",
+  "purpose": "Assess soft skills and past behavior using STAR method",
+  "duration_minutes": 30,
+  "max_questions": 6,
+  "method": "STAR",
+  "star_explanation": {
+    "S": "Situation - Describe the context and background",
+    "T": "Task - Explain your specific responsibility",
+    "A": "Action - Detail what YOU specifically did",
+    "R": "Result - Share the outcome with metrics if possible"
+  },
+  "question_categories": {
+    "teamwork": [
+      {
+        "id": "BEH-TW-001",
+        "type": "teamwork",
+        "question": "Tell me about a challenge you faced working in a team. How did you handle it?",
+        "star_prompts": {
+          "situation": "Describe the team context and the specific challenge",
+          "task": "What was your specific role and responsibility?",
+          "action": "What steps did you personally take to address the challenge?",
+          "result": "What was the outcome and what did you learn?"
+        },
+        "evaluation_criteria": ["collaboration", "conflict_resolution", "communication", "adaptability"],
+        "difficulty": "intermediate",
+        "competencies": ["teamwork", "problem_solving", "communication"]
+      },
+      {
+        "id": "BEH-TW-002",
+        "type": "conflict_resolution",
+        "question": "How do you handle people conflict in a team?",
+        "star_prompts": {
+          "situation": "Describe a specific conflict situation you experienced",
+          "task": "What role did you play in resolving it?",
+          "action": "What specific steps did you take to resolve the conflict?",
+          "result": "How was the conflict resolved and what was the impact?"
+        },
+        "evaluation_criteria": ["emotional_intelligence", "diplomacy", "problem_solving", "mediation"],
+        "difficulty": "advanced",
+        "competencies": ["conflict_resolution", "emotional_intelligence", "leadership"]
+      },
+      {
+        "id": "BEH-TW-003",
+        "type": "collaboration",
+        "question": "Describe a time when you had to work with someone whose working style was very different from yours.",
+        "star_prompts": {
+          "situation": "Describe the person and the situation",
+          "task": "What was the goal you needed to achieve together?",
+          "action": "How did you adapt your approach?",
+          "result": "What was the outcome of this collaboration?"
+        },
+        "evaluation_criteria": ["adaptability", "communication", "flexibility", "empathy"],
+        "difficulty": "intermediate",
+        "competencies": ["adaptability", "teamwork", "communication"]
+      }
+    ],
+    "problem_solving": [
+      {
+        "id": "BEH-PS-001",
+        "type": "analytical",
+        "question": "Describe a time when you had to solve a complex problem with limited information.",
+        "star_prompts": {
+          "situation": "What was the problem and what information was missing?",
+          "task": "What was expected of you?",
+          "action": "How did you gather information and approach the solution?",
+          "result": "What was the outcome?"
+        },
+        "evaluation_criteria": ["analytical_thinking", "resourcefulness", "decision_making", "creativity"],
+        "difficulty": "advanced",
+        "competencies": ["problem_solving", "critical_thinking", "initiative"]
+      },
+      {
+        "id": "BEH-PS-002",
+        "type": "creative",
+        "question": "Tell me about a time when you came up with an innovative solution to a problem.",
+        "star_prompts": {
+          "situation": "What was the problem that needed solving?",
+          "task": "What constraints did you face?",
+          "action": "What was your innovative approach?",
+          "result": "How effective was your solution?"
+        },
+        "evaluation_criteria": ["creativity", "innovation", "risk_taking", "impact"],
+        "difficulty": "advanced",
+        "competencies": ["innovation", "problem_solving", "creativity"]
+      }
+    ],
+    "leadership": [
+      {
+        "id": "BEH-LD-001",
+        "type": "project_leadership",
+        "question": "Tell me about a time you led a project or initiative.",
+        "star_prompts": {
+          "situation": "What was the project context?",
+          "task": "What was your leadership role?",
+          "action": "How did you lead the team and drive progress?",
+          "result": "What were the outcomes?"
+        },
+        "evaluation_criteria": ["initiative", "influence", "accountability", "vision"],
+        "difficulty": "advanced",
+        "competencies": ["leadership", "project_management", "influence"]
+      },
+      {
+        "id": "BEH-LD-002",
+        "type": "mentoring",
+        "question": "Describe a situation where you helped develop or mentor someone.",
+        "star_prompts": {
+          "situation": "Who did you mentor and what was their situation?",
+          "task": "What development goal were you helping with?",
+          "action": "What approach did you take to help them grow?",
+          "result": "What progress did they make?"
+        },
+        "evaluation_criteria": ["coaching", "patience", "communication", "development_focus"],
+        "difficulty": "intermediate",
+        "competencies": ["mentoring", "leadership", "communication"]
+      }
+    ],
+    "deadline_management": [
+      {
+        "id": "BEH-DL-001",
+        "type": "prioritization",
+        "question": "How would you handle a deadline conflict in a project?",
+        "star_prompts": {
+          "situation": "Describe a situation with conflicting deadlines",
+          "task": "What was at stake?",
+          "action": "How did you prioritize and manage?",
+          "result": "What was the outcome?"
+        },
+        "evaluation_criteria": ["prioritization", "time_management", "stakeholder_communication", "decision_making"],
+        "difficulty": "intermediate",
+        "competencies": ["time_management", "prioritization", "communication"]
+      },
+      {
+        "id": "BEH-DL-002",
+        "type": "pressure",
+        "question": "Tell me about a time you had to deliver results under significant pressure.",
+        "star_prompts": {
+          "situation": "What created the pressure?",
+          "task": "What were you expected to deliver?",
+          "action": "How did you manage the pressure and deliver?",
+          "result": "What was the outcome and how did you feel after?"
+        },
+        "evaluation_criteria": ["stress_management", "focus", "resilience", "delivery"],
+        "difficulty": "intermediate",
+        "competencies": ["stress_management", "resilience", "performance_under_pressure"]
+      }
+    ],
+    "product_management": [
+      {
+        "id": "BEH-PM-001",
+        "type": "product_ownership",
+        "question": "What approach would you take on Product Ownership in an Agile environment?",
+        "star_prompts": {
+          "situation": "Describe your experience with product ownership",
+          "task": "What responsibilities did you have?",
+          "action": "How did you manage the backlog and stakeholders?",
+          "result": "What outcomes did you achieve?"
+        },
+        "evaluation_criteria": ["agile_knowledge", "prioritization", "customer_focus", "stakeholder_management"],
+        "difficulty": "advanced",
+        "competencies": ["product_ownership", "agile", "stakeholder_management"]
+      },
+      {
+        "id": "BEH-PM-002",
+        "type": "technical_roadmap",
+        "question": "Describe your approach to Technical Roadmap Development.",
+        "star_prompts": {
+          "situation": "What context required a technical roadmap?",
+          "task": "What was your role in creating it?",
+          "action": "How did you develop and communicate the roadmap?",
+          "result": "How was it received and implemented?"
+        },
+        "evaluation_criteria": ["strategic_thinking", "technical_vision", "communication", "planning"],
+        "difficulty": "advanced",
+        "competencies": ["strategic_planning", "technical_leadership", "communication"]
+      }
+    ],
+    "adaptability": [
+      {
+        "id": "BEH-AD-001",
+        "type": "change_management",
+        "question": "Tell me about a time when you had to adapt to a significant change at work.",
+        "star_prompts": {
+          "situation": "What was the change?",
+          "task": "How did it affect your work?",
+          "action": "How did you adapt?",
+          "result": "What was the outcome of your adaptation?"
+        },
+        "evaluation_criteria": ["flexibility", "resilience", "positive_attitude", "learning_agility"],
+        "difficulty": "intermediate",
+        "competencies": ["adaptability", "resilience", "change_management"]
+      },
+      {
+        "id": "BEH-AD-002",
+        "type": "failure_learning",
+        "question": "Describe a time when you failed at something. What did you learn?",
+        "star_prompts": {
+          "situation": "What was the failure?",
+          "task": "What were you trying to accomplish?",
+          "action": "How did you handle the failure?",
+          "result": "What did you learn and how did you apply it?"
+        },
+        "evaluation_criteria": ["self_awareness", "accountability", "growth_mindset", "learning_ability"],
+        "difficulty": "advanced",
+        "competencies": ["self_awareness", "growth_mindset", "accountability"]
+      }
+    ]
+  },
+  "evaluation_rubric": {
+    "star_method_adherence": {
+      "weight": 0.25,
+      "description": "How well the response follows the STAR structure",
+      "scoring": {
+        "5": "All STAR components clearly and thoroughly addressed",
+        "4": "Most components addressed with minor gaps",
+        "3": "Some components missing or unclear",
+        "2": "Major gaps in structure",
+        "1": "No STAR structure followed"
+      }
+    },
+    "teamwork": {
+      "weight": 0.20,
+      "description": "Collaboration, conflict resolution, and communication",
+      "criteria": ["collaboration", "conflict_resolution", "communication", "empathy"]
+    },
+    "problem_solving": {
+      "weight": 0.20,
+      "description": "Analytical thinking, creativity, and decision-making",
+      "criteria": ["analytical_thinking", "creativity", "decision_making", "resourcefulness"]
+    },
+    "leadership_attitude": {
+      "weight": 0.20,
+      "description": "Initiative, accountability, and influence",
+      "criteria": ["initiative", "accountability", "influence", "vision"]
+    },
+    "logic_structure": {
+      "weight": 0.15,
+      "description": "Coherence, completeness, and relevance of the response",
+      "criteria": ["coherence", "completeness", "relevance", "clarity"]
+    }
+  },
+  "follow_up_templates": {
+    "situation": "Can you describe the specific situation or context in more detail?",
+    "task": "What exactly was your role and responsibility in this situation?",
+    "action": "What specific actions did you take? Walk me through the steps.",
+    "result": "What was the outcome? How did you measure success?"
+  }
+}

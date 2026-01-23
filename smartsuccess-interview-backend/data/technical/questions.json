@@ -1,0 +1,279 @@
+{
+  "category": "technical",
+  "purpose": "Assess technical skills, system design, and practical experience",
+  "duration_minutes": 45,
+  "max_questions": 8,
+  "domains": {
+    "python_engineering": [
+      {
+        "id": "TECH-PY-001",
+        "type": "experience",
+        "question": "Would you consider yourself an expert-level Python engineer? Can you share examples of complex systems you've built with Python?",
+        "expected_topics": ["architecture", "scalability", "best_practices", "testing", "performance"],
+        "evaluation_criteria": ["depth_of_knowledge", "practical_experience", "code_quality", "system_design"],
+        "difficulty": "intermediate",
+        "follow_ups": [
+          "What design patterns do you commonly use?",
+          "How do you handle error handling and logging in production systems?",
+          "What's your approach to testing complex Python applications?"
+        ]
+      },
+      {
+        "id": "TECH-PY-002",
+        "type": "practical",
+        "question": "How would you design a Python application that needs to process millions of records efficiently?",
+        "expected_topics": ["async", "multiprocessing", "memory_management", "generators", "optimization"],
+        "evaluation_criteria": ["system_thinking", "performance_awareness", "practical_solutions"],
+        "difficulty": "advanced",
+        "follow_ups": [
+          "When would you use async vs multiprocessing?",
+          "How would you handle memory constraints?",
+          "What monitoring would you put in place?"
+        ]
+      }
+    ],
+    "llm_frameworks": [
+      {
+        "id": "TECH-LLM-001",
+        "type": "framework_experience",
+        "question": "Which agent or LLM frameworks have you used? (Examples: LangChain, LangGraph, LlamaIndex, AutoGen, CrewAI)",
+        "expected_topics": ["framework_comparison", "use_cases", "limitations", "customization"],
+        "evaluation_criteria": ["breadth_of_experience", "framework_understanding", "practical_application"],
+        "difficulty": "intermediate",
+        "follow_ups": [
+          "What are the key differences between these frameworks?",
+          "When would you choose one over another?",
+          "What limitations have you encountered?"
+        ]
+      },
+      {
+        "id": "TECH-LLM-002",
+        "type": "agent_development",
+        "question": "Have you built or worked with LLM-based autonomous agents before? Can you briefly describe one example?",
+        "expected_topics": ["agent_architecture", "tool_calling", "memory_management", "planning", "error_handling"],
+        "evaluation_criteria": ["hands_on_experience", "system_design", "problem_solving"],
+        "difficulty": "advanced",
+        "follow_ups": [
+          "How did you handle agent failures or hallucinations?",
+          "What tools did you integrate and why?",
+          "How did you manage context and memory?"
+        ]
+      },
+      {
+        "id": "TECH-LLM-003",
+        "type": "orchestration",
+        "question": "Explain how LLM Orchestration works and when you would use it.",
+        "key_concepts": ["multi_agent", "task_decomposition", "coordination", "parallel_execution"],
+        "evaluation_criteria": ["conceptual_understanding", "practical_knowledge", "system_thinking"],
+        "difficulty": "advanced"
+      }
+    ],
+    "rag_architecture": [
+      {
+        "id": "TECH-RAG-001",
+        "type": "system_design",
+        "question": "Walk through the architecture of a RAG or GenAI system you designed. How did data ingestion, embedding, vector storage, retrieval, and generation work end to end?",
+        "expected_topics": ["data_pipeline", "embedding_strategy", "vector_db", "retrieval_optimization", "generation_quality"],
+        "evaluation_criteria": ["system_thinking", "technical_depth", "trade_off_analysis", "end_to_end_understanding"],
+        "difficulty": "advanced",
+        "follow_ups": [
+          "How did you handle document chunking?",
+          "What embedding model did you use and why?",
+          "How did you evaluate retrieval quality?",
+          "What challenges did you face with generation quality?"
+        ]
+      },
+      {
+        "id": "TECH-RAG-002",
+        "type": "concept",
+        "question": "Explain how RAG Architecture works and its key components.",
+        "key_concepts": ["retrieval", "augmentation", "generation", "vector_db", "embedding", "reranking"],
+        "evaluation_criteria": ["conceptual_clarity", "completeness", "practical_understanding"],
+        "difficulty": "intermediate"
+      },
+      {
+        "id": "TECH-RAG-003",
+        "type": "optimization",
+        "question": "What techniques would you use to improve RAG retrieval quality?",
+        "expected_topics": ["chunking_strategies", "hybrid_search", "reranking", "query_expansion", "metadata_filtering"],
+        "evaluation_criteria": ["depth_of_knowledge", "practical_experience", "optimization_thinking"],
+        "difficulty": "advanced"
+      }
+    ],
+    "ml_production": [
+      {
+        "id": "TECH-MLP-001",
+        "type": "end_to_end",
+        "question": "Describe a machine learning system you built and operated in production. What was your role across the full lifecycle—from data ingestion and model training to deployment, monitoring, and iteration?",
+        "expected_topics": ["mlops", "monitoring", "model_versioning", "deployment", "data_pipeline", "iteration"],
+        "evaluation_criteria": ["end_to_end_experience", "operational_maturity", "problem_solving"],
+        "difficulty": "advanced",
+        "follow_ups": [
+          "How did you handle model versioning?",
+          "What monitoring and alerting did you set up?",
+          "How did you decide when to retrain?",
+          "What was your deployment strategy?"
+        ]
+      },
+      {
+        "id": "TECH-MLP-002",
+        "type": "data_engineering",
+        "question": "How have you designed and managed data pipelines for large, noisy, real-world datasets? How did you handle missing data, outliers, schema consistency, and data validation?",
+        "expected_topics": ["data_quality", "pipeline_design", "error_handling", "validation", "monitoring"],
+        "evaluation_criteria": ["data_engineering_skills", "robustness", "scalability"],
+        "difficulty": "advanced"
+      },
+      {
+        "id": "TECH-MLP-003",
+        "type": "time_series",
+        "question": "Walk us through a project involving large-scale, time-series data. What tools did you use for ETL and pipeline orchestration, and what were your strategies for ensuring data quality?",
+        "expected_topics": ["ETL", "orchestration", "data_quality", "time_series_specifics", "tools"],
+        "evaluation_criteria": ["practical_experience", "tool_knowledge", "data_engineering"],
+        "difficulty": "advanced"
+      }
+    ],
+    "cloud_deployment": [
+      {
+        "id": "TECH-CD-001",
+        "type": "experience",
+        "question": "What is your hands-on experience deploying and operating ML systems on cloud platforms? Which services did you use, and why?",
+        "expected_topics": ["GCP", "AWS", "Azure", "service_selection", "cost_optimization", "scaling"],
+        "evaluation_criteria": ["cloud_expertise", "service_knowledge", "practical_decisions"],
+        "difficulty": "intermediate",
+        "follow_ups": [
+          "How did you handle scaling?",
+          "What was your approach to cost management?",
+          "How did you ensure high availability?"
+        ]
+      },
+      {
+        "id": "TECH-CD-002",
+        "type": "architecture",
+        "question": "How would you architect a scalable AI service that needs to handle variable load with cost efficiency?",
+        "expected_topics": ["auto_scaling", "load_balancing", "serverless", "containers", "caching"],
+        "evaluation_criteria": ["architecture_skills", "cost_awareness", "scalability_thinking"],
+        "difficulty": "advanced"
+      }
+    ],
+    "security": [
+      {
+        "id": "TECH-SEC-001",
+        "type": "implementation",
+        "question": "Have you implemented authentication, access control, or security mechanisms for AI/ML systems or agent workflows?",
+        "expected_topics": ["security_patterns", "authorization", "data_protection", "api_security"],
+        "evaluation_criteria": ["security_awareness", "implementation_experience", "best_practices"],
+        "difficulty": "intermediate",
+        "follow_ups": [
+          "How did you handle API key management?",
+          "What data protection measures did you implement?",
+          "How did you secure agent tool access?"
+        ]
+      }
+    ],
+    "integration": [
+      {
+        "id": "TECH-INT-001",
+        "type": "experience",
+        "question": "Have you integrated AI agents with external systems or APIs? Can you describe your approach?",
+        "expected_topics": ["api_design", "error_handling", "rate_limiting", "data_transformation"],
+        "evaluation_criteria": ["integration_skills", "practical_experience", "error_handling"],
+        "difficulty": "intermediate"
+      },
+      {
+        "id": "TECH-INT-002",
+        "type": "concept",
+        "question": "Explain how MCP (Model Context Protocol) works.",
+        "key_concepts": ["context_management", "protocol_design", "tool_integration", "standardization"],
+        "evaluation_criteria": ["technical_understanding", "current_knowledge"],
+        "difficulty": "advanced"
+      }
+    ],
+    "debugging": [
+      {
+        "id": "TECH-DBG-001",
+        "type": "problem_solving",
+        "question": "Recount a time when a deployed model failed to meet expectations in production. What was your root-cause analysis process, and what steps did you take to diagnose and implement the final fix?",
+        "expected_topics": ["debugging_methodology", "monitoring", "iteration", "root_cause_analysis"],
+        "evaluation_criteria": ["problem_solving", "systematic_approach", "learning_from_failure"],
+        "difficulty": "advanced",
+        "follow_ups": [
+          "What tools did you use for debugging?",
+          "How did you prevent similar issues in the future?",
+          "What did you learn from this experience?"
+        ]
+      }
+    ],
+    "model_training": [
+      {
+        "id": "TECH-MT-001",
+        "type": "experience",
+        "question": "Describe your experience with fine-tuning LLMs. What approaches have you used (full fine-tuning, LoRA, QLoRA, etc.)?",
+        "expected_topics": ["fine_tuning_methods", "hyperparameters", "data_preparation", "evaluation"],
+        "evaluation_criteria": ["technical_depth", "practical_experience", "methodology"],
+        "difficulty": "advanced"
+      },
+      {
+        "id": "TECH-MT-002",
+        "type": "forecasting",
+        "question": "Describe a project involving time-varying data or forecasting. How did you design features, validate models over time, detect drift, and retrain models to maintain performance?",
+        "expected_topics": ["feature_engineering", "temporal_validation", "drift_detection", "retraining"],
+        "evaluation_criteria": ["ml_methodology", "practical_experience", "scientific_rigor"],
+        "difficulty": "advanced"
+      }
+    ],
+    "concept_explanation": [
+      {
+        "id": "TECH-CE-001",
+        "type": "concept",
+        "question": "Explain how Agentic Workflows work and when you would use them.",
+        "key_concepts": ["agent_coordination", "tool_use", "planning", "execution", "memory"],
+        "evaluation_criteria": ["conceptual_understanding", "practical_knowledge"],
+        "difficulty": "intermediate"
+      },
+      {
+        "id": "TECH-CE-002",
+        "type": "concept",
+        "question": "What is Function Calling in LLMs and how does it enable tool use?",
+        "key_concepts": ["function_schemas", "tool_selection", "argument_parsing", "execution"],
+        "evaluation_criteria": ["technical_accuracy", "explanation_clarity"],
+        "difficulty": "intermediate"
+      },
+      {
+        "id": "TECH-CE-003",
+        "type": "concept",
+        "question": "Explain the difference between dense and sparse retrieval in search systems.",
+        "key_concepts": ["embeddings", "bm25", "hybrid_search", "trade_offs"],
+        "evaluation_criteria": ["technical_depth", "practical_understanding"],
+        "difficulty": "intermediate"
+      }
+    ]
+  },
+  "evaluation_rubric": {
+    "technical_accuracy": {
+      "weight": 0.35,
+      "description": "Correctness of technical facts and concepts",
+      "criteria": ["correctness", "depth", "precision", "up_to_date_knowledge"]
+    },
+    "practical_experience": {
+      "weight": 0.25,
+      "description": "Real hands-on experience with the technologies",
+      "criteria": ["hands_on_examples", "real_world_application", "lessons_learned", "authentic_experience"]
+    },
+    "system_thinking": {
+      "weight": 0.20,
+      "description": "Ability to see the bigger picture and consider trade-offs",
+      "criteria": ["architecture_understanding", "trade_offs", "scalability", "maintainability"]
+    },
+    "communication_clarity": {
+      "weight": 0.20,
+      "description": "Ability to explain complex concepts clearly",
+      "criteria": ["explanation_quality", "structure", "technical_vocabulary", "appropriate_detail"]
+    }
+  },
+  "hire_signals": {
+    "strong": "Demonstrates deep expertise, real experience, and strong problem-solving",
+    "moderate": "Good foundational knowledge with some practical experience",
+    "weak": "Limited experience or significant knowledge gaps",
+    "no": "Concerning gaps or inability to demonstrate claimed skills"
+  }
+}

@@ -1,0 +1,135 @@
+{
+  "category": "screening",
+  "purpose": "First impression assessment - Communication, motivation, and basic fit",
+  "duration_minutes": 15,
+  "max_questions": 5,
+  "questions": [
+    {
+      "id": "SCR-001",
+      "type": "self_introduction",
+      "question": "Tell me about yourself.",
+      "evaluation_criteria": ["communication_clarity", "relevance", "confidence"],
+      "follow_ups": [
+        "What aspects of your background are most relevant to this role?",
+        "How would you summarize your career journey in one sentence?",
+        "What's the thread that connects your various experiences?"
+      ],
+      "difficulty": "basic",
+      "expected_duration_seconds": 90
+    },
+    {
+      "id": "SCR-002",
+      "type": "motivation",
+      "question": "Why are you interested in this role?",
+      "evaluation_criteria": ["company_research", "role_understanding", "enthusiasm"],
+      "follow_ups": [
+        "What specifically about our company attracted you?",
+        "How does this role align with your career goals?",
+        "What excites you most about this opportunity?"
+      ],
+      "difficulty": "basic",
+      "expected_duration_seconds": 60
+    },
+    {
+      "id": "SCR-003",
+      "type": "transition",
+      "question": "Why did you leave (or are considering leaving) your last job?",
+      "evaluation_criteria": ["professionalism", "honesty", "growth_mindset"],
+      "follow_ups": [
+        "What would have made you stay longer?",
+        "What did you learn from that experience?",
+        "How did that decision lead you here?"
+      ],
+      "difficulty": "intermediate",
+      "expected_duration_seconds": 60
+    },
+    {
+      "id": "SCR-004",
+      "type": "fit_assessment",
+      "question": "Why do you think you are the best fit for this role?",
+      "evaluation_criteria": ["self_awareness", "skill_matching", "value_proposition"],
+      "follow_ups": [
+        "What unique skills do you bring that others might not?",
+        "How would you describe your working style?",
+        "What makes you stand out from other candidates?"
+      ],
+      "difficulty": "intermediate",
+      "expected_duration_seconds": 90
+    },
+    {
+      "id": "SCR-005",
+      "type": "situational",
+      "question": "What would you do if you were assigned a task you've never done before?",
+      "evaluation_criteria": ["problem_solving", "resourcefulness", "adaptability"],
+      "follow_ups": [
+        "Can you give an example of when this happened?",
+        "How do you typically approach learning new skills?",
+        "Who would you reach out to for help?"
+      ],
+      "difficulty": "intermediate",
+      "expected_duration_seconds": 60
+    },
+    {
+      "id": "SCR-006",
+      "type": "availability",
+      "question": "What is your availability and when could you start?",
+      "evaluation_criteria": ["clarity", "flexibility", "commitment"],
+      "follow_ups": [
+        "Do you have any commitments that might affect your start date?",
+        "Are you interviewing with other companies currently?"
+      ],
+      "difficulty": "basic",
+      "expected_duration_seconds": 30
+    },
+    {
+      "id": "SCR-007",
+      "type": "expectations",
+      "question": "What are your salary expectations for this role?",
+      "evaluation_criteria": ["research", "negotiation_readiness", "clarity"],
+      "follow_ups": [
+        "How did you arrive at that number?",
+        "Is there flexibility in your expectations?"
+      ],
+      "difficulty": "intermediate",
+      "expected_duration_seconds": 45
+    },
+    {
+      "id": "SCR-008",
+      "type": "closing",
+      "question": "Do you have any questions for me about the role or company?",
+      "evaluation_criteria": ["curiosity", "preparation", "engagement"],
+      "follow_ups": [],
+      "difficulty": "basic",
+      "expected_duration_seconds": 120
+    }
+  ],
+  "evaluation_rubric": {
+    "communication_skills": {
+      "weight": 0.30,
+      "description": "Clarity, conciseness, and confidence in expression",
+      "criteria": ["clarity", "conciseness", "confidence", "articulation"]
+    },
+    "basic_fit": {
+      "weight": 0.30,
+      "description": "Understanding of role, motivation, and availability",
+      "criteria": ["role_understanding", "motivation", "availability", "commitment"]
+    },
+    "judgment": {
+      "weight": 0.20,
+      "description": "Practical thinking, values alignment, and decision-making",
+      "criteria": ["practical_thinking", "values_alignment", "decision_quality"]
+    },
+    "first_impression": {
+      "weight": 0.20,
+      "description": "Professionalism, enthusiasm, and preparation",
+      "criteria": ["professionalism", "enthusiasm", "preparation", "engagement"]
+    }
+  },
+  "scoring_guide": {
+    "5": "Exceptional - Exceeds expectations, highly impressive",
+    "4": "Strong - Meets all expectations with some standout moments",
+    "3": "Adequate - Meets basic expectations",
+    "2": "Below Average - Some gaps or concerns",
+    "1": "Poor - Significant concerns or red flags"
+  }
+}
