@@ -3,9 +3,10 @@ import { ArrowRight, CheckCircle2, FileText, ChevronLeft, ExternalLink } from 'l
 
 interface DemoPageProps {
     onBack: () => void;
+    onViewSample: () => void;
 }
 
-export const DemoPage: React.FC<DemoPageProps> = ({ onBack }) => {
+export const DemoPage: React.FC<DemoPageProps> = ({ onBack, onViewSample }) => {
   return (
     <div className="h-full overflow-y-auto bg-white">
       <div className="max-w-6xl mx-auto p-8">
@@ -47,7 +48,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({ onBack }) => {
                     >
                         Try MatchWise Live <ExternalLink size={16} />
                     </a>
-                    <button className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-white border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-all">
+                    <button 
+                        onClick={onViewSample}
+                        className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-white border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-all"
+                    >
                         View Sample Analysis
                     </button>
                 </div>

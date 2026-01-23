@@ -6,6 +6,7 @@ import { InterviewPage } from './views/InterviewPage';
 import { DashboardPage } from './views/DashboardPage';
 import { DemoPage } from './views/DemoPage';
 import { SkillsLabPage } from './views/SkillsLabPage';
+import { SampleAnalysisPage } from './views/SampleAnalysisPage';
 import { AuthProvider } from './contexts/AuthContext';
 
 function AppContent() {
@@ -57,11 +58,18 @@ function AppContent() {
         )}
         
         {currentView === 'demo' && (
-          <DemoPage onBack={() => setCurrentView('interview')} />
+          <DemoPage 
+            onBack={() => setCurrentView('interview')} 
+            onViewSample={() => setCurrentView('sample-analysis')}
+          />
         )}
 
         {currentView === 'lab' && (
           <SkillsLabPage onBackToHome={() => setCurrentView('landing')} />
+        )}
+
+        {currentView === 'sample-analysis' && (
+          <SampleAnalysisPage onBack={() => setCurrentView('demo')} />
         )}
       </main>
     </div>
