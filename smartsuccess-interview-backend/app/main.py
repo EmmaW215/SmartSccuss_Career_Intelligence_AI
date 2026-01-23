@@ -74,6 +74,7 @@ if not allowed_origins or allowed_origins == [""]:
         "http://localhost:5173",
         "https://smart-sccuss-career-intelligence-ai.vercel.app",
         "https://smartsuccess-ai.vercel.app",
+        "https://smartsccuss-career-intelligence-ai.onrender.com",
     ]
 
 app.add_middleware(

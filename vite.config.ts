@@ -12,7 +12,9 @@ export default defineConfig(({ mode }) => {
       plugins: [react()],
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+        'process.env.NEXT_PUBLIC_BACKEND_URL': JSON.stringify(env.NEXT_PUBLIC_BACKEND_URL || 'https://smartsccuss-career-intelligence-ai.onrender.com'),
+        'process.env.NEXT_PUBLIC_RENDER_BACKEND_URL': JSON.stringify(env.NEXT_PUBLIC_RENDER_BACKEND_URL || 'https://smartsccuss-career-intelligence-ai.onrender.com')
       },
       resolve: {
         alias: {

@@ -12,9 +12,17 @@ View your app in AI Studio: https://ai.studio/apps/drive/1LWVxPRAu7KgyqvtoHyYJ3e
 
 **Prerequisites:**  Node.js
 
+### Frontend
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Set the `GEMINI_API_KEY` in `.env.local` to your Gemini API key
+3. (Optional) Set `NEXT_PUBLIC_BACKEND_URL` to your backend URL (defaults to `https://smartsccuss-career-intelligence-ai.onrender.com`)
+4. Run the app:
    `npm run dev`
+
+### Backend
+
+The backend is deployed on Render: **https://smartsccuss-career-intelligence-ai.onrender.com**
+
+For local backend development, see [smartsuccess-interview-backend/README.md](smartsuccess-interview-backend/README.md)
