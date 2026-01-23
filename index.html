@@ -27,6 +27,15 @@
                 purple: '#7c3aed',
                 blue: '#2563eb',
               }
+            },
+            animation: {
+              shimmer: 'shimmer 2.5s linear infinite',
+            },
+            keyframes: {
+              shimmer: {
+                '0%': { transform: 'translateX(-150%) skewX(-20deg)' },
+                '100%': { transform: 'translateX(150%) skewX(-20deg)' },
+              }
             }
           }
         }

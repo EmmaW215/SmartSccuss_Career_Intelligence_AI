@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, RefreshCw, Send, Play, Square, AlertCircle, Bot, LogIn, Lock } from 'lucide-react';
+import { Mic, MicOff, RefreshCw, Send, Play, Square, AlertCircle, Bot, LogIn, Lock, CheckCircle, User, Crown } from 'lucide-react';
 import { InterviewType, Message } from '../types';
 import SimpleVisitorCounter from '../components/SimpleVisitorCounter';
 import { generateInterviewResponse } from '../services/geminiService';
@@ -132,6 +132,50 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
     onNavigateToDashboard();
   };
 
+  // Helper for button appearance
+  const getStatusButtonConfig = () => {
+    if (isLoading) {
+        return {
+            text: 'Loading...',
+            icon: <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>,
+            className: 'bg-gray-400 text-white cursor-wait',
+            disabled: true,
+            onClick: undefined
+        };
+    }
+
+    if (!isAuthenticated) {
+        return {
+            text: 'Guest user Login/Sign up',
+            icon: <LogIn size={16} />,
+            className: 'bg-blue-600 text-white hover:bg-blue-700 shadow-md',
+            disabled: false,
+            onClick: login
+        };
+    }
+
+    if (isPro) {
+        return {
+            text: 'Pro Connected',
+            icon: <Crown size={16} />,
+            className: 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white shadow-md cursor-default',
+            disabled: true, // Status indicator only
+            onClick: undefined
+        };
+    }
+
+    // Authenticated but Free
+    return {
+        text: 'User Connected',
+        icon: <CheckCircle size={16} />,
+        className: 'bg-green-50 text-green-700 border border-green-200 shadow-none cursor-default',
+        disabled: true, // Status indicator only
+        onClick: undefined
+    };
+  };
+
+  const btnConfig = getStatusButtonConfig();
+
   return (
     <div className="flex flex-col h-full bg-gray-50/50">
       {/* Top Bar */}
@@ -153,18 +197,12 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
           </button>
           
           <button 
-            onClick={isAuthenticated ? undefined : login}
-            disabled={isLoading || isAuthenticated}
-            className={`px-4 py-2 text-sm font-semibold rounded-lg shadow-md transition-all flex items-center gap-2 ${
-              isAuthenticated 
-                ? 'bg-green-50 text-green-700 border border-green-200 shadow-none cursor-default' 
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
+            onClick={btnConfig.onClick}
+            disabled={btnConfig.disabled}
+            className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all flex items-center gap-2 ${btnConfig.className}`}
           >
-            {isLoading ? (
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-            ) : isAuthenticated ? <Bot size={16} /> : <LogIn size={16} />}
-            {isAuthenticated ? 'Pro Connected' : 'Pro Login'}
+            {btnConfig.icon}
+            {btnConfig.text}
           </button>
         </div>
       </div>

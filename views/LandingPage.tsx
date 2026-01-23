@@ -32,7 +32,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onEnterApp, onNavigate
             {isLoading ? (
                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
             ) : <LogIn size={16} />}
-            {isAuthenticated ? `Welcome, ${user?.name.split(' ')[0]}` : "Guest User Login/Sign Up"}
+            {isAuthenticated ? `Welcome, ${user?.name.split(' ')[0]}` : "Guest user Login/Sign up"}
           </button>
         </div>
       </nav>
@@ -56,9 +56,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onEnterApp, onNavigate
         <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md mx-auto">
             <button 
                 onClick={onEnterApp}
-                className="flex-1 flex items-center justify-center gap-2 px-8 py-4 bg-blue-600 text-white text-lg font-bold rounded-xl shadow-blue-200 shadow-xl hover:bg-blue-700 hover:-translate-y-1 transition-all"
+                className="group relative flex-1 flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-lg font-bold rounded-xl shadow-blue-200 shadow-xl hover:shadow-2xl hover:scale-[1.02] transition-all overflow-hidden"
             >
-                Start your Intelligent Journey <ArrowRight size={20} />
+                {/* Flowing light effect */}
+                <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white/25 to-transparent -translate-x-full animate-shimmer z-0"></div>
+                
+                <span className="relative z-10 flex items-center gap-2">
+                    Start your Intelligent Journey <ArrowRight size={20} />
+                </span>
             </button>
         </div>
 

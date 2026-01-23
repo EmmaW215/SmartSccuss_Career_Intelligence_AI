@@ -17,7 +17,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   selectedInterviewType
 }) => {
   const [isInterviewOpen, setIsInterviewOpen] = useState(true);
-  const { user, isAuthenticated, logout, login, isLoading } = useAuth();
+  const { user, isAuthenticated, logout, login, isLoading, isPro } = useAuth();
 
   const topMenuItems = [
     { id: 'landing', label: 'Home', icon: Home, view: 'landing' as ViewState },
@@ -39,7 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           SmartSuccess.AI
         </h2>
         <p className="text-xs text-gray-400 mt-1 uppercase tracking-wider font-semibold">
-            {user?.type === 'registered' ? 'Pro Edition' : 'Free Preview'}
+            {isAuthenticated ? (isPro ? 'Pro Edition' : 'Standard Edition') : 'Free Preview'}
         </p>
       </div>
 
@@ -134,18 +134,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="p-4 border-t border-gray-100 bg-gray-50/50">
         <div className="flex items-center gap-3 p-2 rounded-lg hover:bg-white hover:shadow-sm transition-all cursor-pointer group">
             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md group-hover:scale-105 transition-transform ${
-                user?.type === 'registered' ? 'bg-gradient-to-br from-indigo-500 to-purple-500' : 'bg-gray-400'
+                isPro ? 'bg-gradient-to-br from-indigo-500 to-purple-500' : 
+                isAuthenticated ? 'bg-gradient-to-br from-green-500 to-emerald-500' : 
+                'bg-gray-400'
             }`}>
                 {user?.avatar || 'GU'}
             </div>
             <div className="flex-1">
                 <p className="text-sm font-semibold text-gray-800">{user?.name}</p>
-                <p className="text-xs text-gray-500">{user?.type === 'registered' ? 'Pro Plan' : 'Guest Account'}</p>
+                <p className="text-xs text-gray-500">
+                    {isAuthenticated ? (isPro ? 'Pro Connected' : 'User Connected') : 'Guest User'}
+                </p>
             </div>
             <Settings className="w-4 h-4 text-gray-400 hover:text-gray-600" />
         </div>
         
-        {user?.type === 'registered' ? (
+        {isAuthenticated ? (
           <button 
             onClick={logout}
             className="w-full mt-3 flex items-center justify-center gap-2 text-xs font-medium text-red-500 hover:text-red-600 py-2 hover:bg-red-50 rounded-lg transition-colors"
