@@ -149,7 +149,8 @@ async def get_user_stats(
                                 all_sessions_list.append(store_session)
                         else:
                             # Create temporary entry
-                            from app.services.session_store import InterviewSession as StoreSession, InterviewStatus
+                            # Note: InterviewStatus is already imported globally at top of file
+                            from app.services.session_store import InterviewSession as StoreSession
                             from app.models import InterviewPhase
                             
                             status_map = {
@@ -289,7 +290,8 @@ async def generate_interview_report(
                     session = convert_base_session_to_store(base_session, session_store)
                 else:
                     # Create a temporary StoreSession-like object
-                    from app.services.session_store import InterviewSession as StoreSession, InterviewStatus
+                    # Note: InterviewStatus is already imported globally at top of file
+                    from app.services.session_store import InterviewSession as StoreSession
                     from app.models import InterviewPhase
                     
                     # Map phase to status
