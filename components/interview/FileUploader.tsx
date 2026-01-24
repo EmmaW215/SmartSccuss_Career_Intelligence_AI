@@ -131,7 +131,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
   };
 
   return (
-    <div className="file-uploader">
+    <div className="file-uploader w-full">
       {/* Drop Zone */}
       <div
         onDrop={handleDrop}

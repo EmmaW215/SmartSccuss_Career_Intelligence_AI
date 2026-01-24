@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, RefreshCw, Send, Play, Square, AlertCircle, Bot, LogIn, Lock, CheckCircle, User, Crown, Star, TrendingUp } from 'lucide-react';
+import { Mic, MicOff, RefreshCw, Send, Play, Square, AlertCircle, Bot, LogIn, Lock, CheckCircle, User, Crown, Star, TrendingUp, Upload, X } from 'lucide-react';
 import { InterviewType, Message } from '../types';
 import SimpleVisitorCounter from '../components/SimpleVisitorCounter';
+import { FileUploader } from '../components/interview/FileUploader';
 import { 
   startInterviewSession, 
   sendInterviewMessage, 
   deleteInterviewSession,
   checkBackendHealth,
+  uploadCustomizeInterviewFiles,
   type MessageResponse 
 } from '../services/interviewService';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,6 +34,12 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
   const [totalQuestions, setTotalQuestions] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // File upload state (for Customize Interview)
+  const [uploadedFiles, setUploadedFiles] = useState<Array<{ id: string; name: string; size: number; type: string; file: File }>>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [showFileUploader, setShowFileUploader] = useState(false);
+  const [filesUploaded, setFilesUploaded] = useState(false);
   
   const { user, login, isAuthenticated, isLoading, isPro, triggerLogin, triggerUpgrade } = useAuth();
 
@@ -220,6 +228,42 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
     }
   };
 
+  // Handle file upload for Customize Interview
+  const handleFilesChange = (files: Array<{ id: string; name: string; size: number; type: string; file: File }>) => {
+    setUploadedFiles(files);
+  };
+
+  const handleUploadFiles = async () => {
+    if (!user?.id || uploadedFiles.length === 0) return;
+
+    try {
+      setIsUploading(true);
+      setError(null);
+
+      const fileObjects = uploadedFiles.map(f => f.file);
+      const result = await uploadCustomizeInterviewFiles(user.id, fileObjects);
+
+      if (result.success) {
+        setFilesUploaded(true);
+        setShowFileUploader(false);
+        
+        // Add success message
+        const successMsg: Message = {
+          id: `upload-success-${Date.now()}`,
+          role: 'ai',
+          content: `✅ Successfully uploaded ${result.files_processed} file(s)! Your interview has been personalized based on your documents. You can now proceed with the interview.`,
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, successMsg]);
+      }
+    } catch (error: any) {
+      console.error('Error uploading files:', error);
+      setError(error.message || 'Failed to upload files. Please try again.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handlePracticeAgain = async () => {
     if (!checkAccess()) return;
     
@@ -235,6 +279,9 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
       setCurrentQuestionNumber(0);
       setTotalQuestions(0);
       setError(null);
+      setUploadedFiles([]);
+      setFilesUploaded(false);
+      setShowFileUploader(false);
 
       // Reinitialize session
       const userId = user?.id || `user_${Date.now()}`;
@@ -416,6 +463,103 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
           >
             ×
           </button>
+        </div>
+      )}
+
+      {/* File Upload Section (Only for Customize Interview) */}
+      {interviewType === InterviewType.CUSTOMIZE && (
+        <div className="mx-8 mt-4">
+          {!filesUploaded && !showFileUploader ? (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Upload size={20} className="text-blue-600" />
+                  <div>
+                    <p className="text-sm font-medium text-blue-800">Upload Your Documents</p>
+                    <p className="text-xs text-blue-600">Upload your resume, job description, and other relevant files to personalize your interview</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowFileUploader(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                >
+                  Upload Files
+                </button>
+              </div>
+            </div>
+          ) : showFileUploader && !filesUploaded ? (
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-800">Upload Documents</h3>
+                <button
+                  onClick={() => {
+                    setShowFileUploader(false);
+                    setUploadedFiles([]);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <FileUploader
+                onFilesChange={handleFilesChange}
+                acceptedFormats={['.pdf', '.txt', '.md', '.docx']}
+                maxFiles={5}
+                maxSizeMB={10}
+              />
+              {uploadedFiles.length > 0 && (
+                <div className="mt-4 flex justify-end gap-3">
+                  <button
+                    onClick={() => {
+                      setShowFileUploader(false);
+                      setUploadedFiles([]);
+                    }}
+                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    disabled={isUploading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleUploadFiles}
+                    disabled={isUploading || uploadedFiles.length === 0}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isUploading ? (
+                      <>
+                        <RefreshCw size={16} className="animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={16} />
+                        Upload {uploadedFiles.length} File{uploadedFiles.length > 1 ? 's' : ''}
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : filesUploaded ? (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <div className="flex items-center gap-3">
+                <CheckCircle size={20} className="text-green-600" />
+                <div>
+                  <p className="text-sm font-medium text-green-800">Files Uploaded Successfully</p>
+                  <p className="text-xs text-green-600">Your interview has been personalized based on your documents</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setFilesUploaded(false);
+                    setShowFileUploader(true);
+                    setUploadedFiles([]);
+                  }}
+                  className="ml-auto text-sm text-green-700 hover:text-green-900 underline"
+                >
+                  Upload More
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
 

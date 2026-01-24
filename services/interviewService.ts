@@ -424,3 +424,47 @@ export async function getSessionFeedback(sessionId: string): Promise<SessionFeed
     throw error;
   }
 }
+
+/**
+ * Upload files for Customize Interview
+ */
+export interface UploadFilesResponse {
+  success: boolean;
+  user_id: string;
+  files_processed: number;
+  profile?: Record<string, any>;
+  selected_questions?: Array<any>;
+  rag_id?: string;
+}
+
+export async function uploadCustomizeInterviewFiles(
+  userId: string,
+  files: File[]
+): Promise<UploadFilesResponse> {
+  const url = `${BACKEND_URL}/api/interview/customize/upload`;
+  
+  try {
+    const formData = new FormData();
+    formData.append('user_id', userId);
+    
+    files.forEach((file) => {
+      formData.append('files', file);
+    });
+
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to upload files: ${response.status} ${errorText}`);
+    }
+
+    const data: UploadFilesResponse = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error uploading files:', error);
+    throw error;
+  }
+}
