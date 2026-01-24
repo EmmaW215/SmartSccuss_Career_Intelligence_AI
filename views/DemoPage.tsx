@@ -8,17 +8,15 @@ interface DemoPageProps {
 }
 
 export const DemoPage: React.FC<DemoPageProps> = ({ onBack, onViewSample }) => {
-  const { isAuthenticated, isPro, triggerLogin, triggerUpgrade } = useAuth();
+  const { isAuthenticated, triggerLogin } = useAuth();
 
   const handleTryLive = (e: React.MouseEvent) => {
     e.preventDefault();
     if (!isAuthenticated) {
       triggerLogin();
-    } else if (!isPro) {
-      triggerUpgrade();
-    } else {
-      window.open("https://matchwise-ai.vercel.app/", "_blank");
+      return;
     }
+    window.open("https://matchwise-ai.vercel.app/", "_blank");
   };
 
   const handleViewSample = () => {
