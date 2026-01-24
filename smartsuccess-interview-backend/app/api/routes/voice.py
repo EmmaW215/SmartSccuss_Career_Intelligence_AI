@@ -1,6 +1,10 @@
 """
 Voice API Routes
 Speech-to-text and text-to-speech endpoints
+
+Phase 2 Enhancement: Adds GPU server support with graceful fallback to OpenAI
+Default behavior: Uses OpenAI (existing behavior)
+Phase 2 mode: Uses GPU server when available, falls back to OpenAI or Edge-TTS
 """
 
 import io
@@ -13,6 +17,16 @@ from app.core.voice_service import VoiceService, get_voice_service
 from app.interview.screening_interview import get_screening_interview_service
 from app.interview.behavioral_interview import get_behavioral_interview_service
 from app.interview.technical_interview import get_technical_interview_service
+from app.config import settings
+
+# Phase 2: Optional GPU client
+try:
+    from app.services.gpu_client import get_gpu_client, VoiceProvider
+    GPU_AVAILABLE = True
+except ImportError:
+    GPU_AVAILABLE = False
+    get_gpu_client = None
+    VoiceProvider = None
 
 router = APIRouter(
     prefix="/api/voice",
@@ -33,9 +47,28 @@ async def transcribe_audio(
     """
     Transcribe audio to text using Whisper
     
+    Phase 2: Tries GPU server first (if enabled), falls back to OpenAI
+    Default: Uses OpenAI (existing behavior)
+    
     - **audio**: Audio file (mp3, wav, webm, m4a, etc.)
     - **language**: ISO language code (default: en)
     """
+    # Phase 2: Try GPU server if enabled
+    if GPU_AVAILABLE and getattr(settings, 'use_gpu_voice', False):
+        try:
+            gpu_client = get_gpu_client()
+            audio_data = await audio.read()
+            transcript, provider = await gpu_client.transcribe(audio_data, language)
+            return {
+                "text": transcript,
+                "language": language,
+                "provider": provider.value if provider else "gpu"
+            }
+        except Exception as e:
+            # Fallback to OpenAI if GPU fails
+            print(f"GPU transcription failed, falling back to OpenAI: {e}")
+    
+    # Default: Use OpenAI (existing behavior)
     voice_service = get_service()
     
     if not voice_service.is_available():
@@ -50,7 +83,8 @@ async def transcribe_audio(
         
         return {
             "text": text,
-            "language": language
+            "language": language,
+            "provider": "openai"
         }
         
     except Exception as e:
@@ -66,12 +100,37 @@ async def synthesize_speech(
     """
     Synthesize text to speech
     
-    - **text**: Text to synthesize
-    - **voice**: Voice option (alloy, echo, fable, onyx, nova, shimmer)
-    - **speed**: Speech speed (0.25 to 4.0)
+    Phase 2: Tries GPU server first (if enabled), falls back to Edge-TTS or OpenAI
+    Default: Uses OpenAI (existing behavior)
     
-    Returns MP3 audio file.
+    - **text**: Text to synthesize
+    - **voice**: Voice option (alloy, echo, fable, onyx, nova, shimmer for OpenAI; professional, friendly, calm for GPU)
+    - **speed**: Speech speed (0.25 to 4.0) - OpenAI only
+    
+    Returns audio file.
     """
+    # Phase 2: Try GPU server if enabled
+    if GPU_AVAILABLE and getattr(settings, 'use_gpu_voice', False):
+        try:
+            gpu_client = get_gpu_client()
+            audio_data, provider = await gpu_client.synthesize(
+                text=text,
+                voice=voice if voice in ["professional", "friendly", "calm"] else "professional"
+            )
+            mime_type = "audio/wav" if provider == VoiceProvider.GPU else "audio/mp3"
+            return StreamingResponse(
+                io.BytesIO(audio_data),
+                media_type=mime_type,
+                headers={
+                    "Content-Disposition": "attachment; filename=response.wav",
+                    "X-Voice-Provider": provider.value
+                }
+            )
+        except Exception as e:
+            # Fallback to OpenAI if GPU fails
+            print(f"GPU synthesis failed, falling back to OpenAI: {e}")
+    
+    # Default: Use OpenAI (existing behavior)
     voice_service = get_service()
     
     if not voice_service.is_available():
@@ -87,7 +146,8 @@ async def synthesize_speech(
             io.BytesIO(audio_data),
             media_type="audio/mpeg",
             headers={
-                "Content-Disposition": "attachment; filename=response.mp3"
+                "Content-Disposition": "attachment; filename=response.mp3",
+                "X-Voice-Provider": "openai"
             }
         )
         
@@ -231,9 +291,27 @@ async def get_voice_service_status():
     """Check voice service availability"""
     voice_service = get_service()
     
-    return {
+    status = {
         "available": voice_service.is_available(),
         "whisper_model": voice_service.whisper_model,
         "tts_model": voice_service.tts_model,
-        "default_voice": voice_service.default_voice
+        "default_voice": voice_service.default_voice,
+        "provider": "openai"
     }
+    
+    # Phase 2: Add GPU status if available
+    if GPU_AVAILABLE:
+        try:
+            gpu_client = get_gpu_client()
+            gpu_status = await gpu_client.check_health()
+            status["gpu"] = {
+                "available": gpu_status.get("available", False),
+                "services": gpu_status.get("services", {}),
+                "latency_ms": gpu_status.get("latency_ms")
+            }
+            if gpu_status.get("available") and getattr(settings, 'use_gpu_voice', False):
+                status["provider"] = "gpu"
+        except Exception:
+            status["gpu"] = {"available": False, "error": "GPU client not initialized"}
+    
+    return status

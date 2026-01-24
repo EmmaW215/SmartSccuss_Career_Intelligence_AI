@@ -12,6 +12,12 @@ pydantic-settings>=2.1.0
 openai>=1.10.0
 httpx>=0.26.0
 
+# Phase 2: Gemini API support (optional)
+# google-generativeai>=0.3.0  # Uncomment if using Gemini
+
+# Phase 2: Edge-TTS fallback (optional, free Microsoft TTS)
+edge-tts>=6.1.10  # Free TTS fallback
+
 # Environment and Configuration
 python-dotenv>=1.0.0
 

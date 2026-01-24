@@ -22,6 +22,15 @@ load_dotenv()
 # Import routers
 from app.api.routes import screening, behavioral, technical, voice, health
 
+# Phase 2: Optional routes (only loaded if available)
+try:
+    from app.api.routes import customize, dashboard
+    PHASE2_AVAILABLE = True
+except ImportError:
+    PHASE2_AVAILABLE = False
+    customize = None
+    dashboard = None
+
 # Lifespan context manager for startup/shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -40,6 +49,19 @@ async def lifespan(app: FastAPI):
     
     print("✅ RAG services initialized")
     print("✅ Interview services ready")
+    
+    # Phase 2: Initialize optional session store (for customize/dashboard features)
+    try:
+        from app.services.session_store import SessionStore
+        from app.config import settings
+        
+        # Only initialize if Phase 2 features are enabled
+        if getattr(settings, 'cost_optimized_mode', False) or getattr(settings, 'use_conversation_engine', True):
+            app.state.session_store = SessionStore()
+            print("✅ Phase 2 session store initialized")
+    except Exception as e:
+        print(f"⚠️  Phase 2 session store not initialized: {e}")
+        app.state.session_store = None
     
     yield
     
@@ -92,6 +114,12 @@ app.include_router(behavioral.router)
 app.include_router(technical.router)
 app.include_router(voice.router)
 
+# Phase 2: Include optional routers (only if available)
+if PHASE2_AVAILABLE and customize and dashboard:
+    app.include_router(customize.router)
+    app.include_router(dashboard.router)
+    print("✅ Phase 2 routes (customize, dashboard) enabled")
+
 # Root endpoint
 @app.get("/")
 async def root():
@@ -106,6 +134,11 @@ async def root():
             "technical": "/api/interview/technical",
             "voice": "/api/voice",
             "docs": "/docs"
+        },
+        "phase2_features": {
+            "available": PHASE2_AVAILABLE,
+            "customize": "/api/interview/customize" if PHASE2_AVAILABLE else None,
+            "dashboard": "/api/dashboard" if PHASE2_AVAILABLE else None
         }
     }
 

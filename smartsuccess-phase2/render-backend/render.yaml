@@ -1,0 +1,21 @@
+# render.yaml - Render Blueprint for SmartSuccess.AI
+# Deploy to Render Free Tier
+
+services:
+  - type: web
+    name: smartsuccess-interview-backend
+    runtime: python
+    plan: free  # $0/month
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: GEMINI_API_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: GPU_SERVER_URL
+        sync: false  # Set manually (your GPU server URL)
+      - key: OPENAI_API_KEY
+        sync: false  # Optional fallback
+    healthCheckPath: /health
+    autoDeploy: true

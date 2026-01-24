@@ -1,0 +1,27 @@
+# SmartSuccess.AI Interview Backend - Phase 2
+# Optimized for Render Free Tier (<512MB RAM)
+
+# Core Framework
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+pydantic==2.6.1
+pydantic-settings==2.1.0
+
+# HTTP Client (for Gemini/GPU APIs)
+httpx==0.26.0
+
+# TTS Fallback (FREE Microsoft Edge TTS)
+edge-tts==6.1.10
+
+# File Processing
+python-multipart==0.0.9
+
+# Utilities
+python-dotenv==1.0.1
+
+# Note: Heavy dependencies moved to GPU server:
+# - transformers (for embeddings)
+# - chromadb (for vector store)
+# - torch (for GPU models)
+# - openai-whisper (for STT)
+# - TTS (for XTTS)
