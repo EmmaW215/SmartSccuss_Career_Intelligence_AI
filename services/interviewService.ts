@@ -333,6 +333,65 @@ export async function checkBackendHealth(): Promise<boolean> {
 }
 
 /**
+ * Voice API Functions
+ */
+
+/**
+ * Transcribe audio to text using backend API
+ */
+export interface TranscribeResponse {
+  text: string;
+  language: string;
+  provider: string;
+}
+
+export async function transcribeAudio(
+  audioBlob: Blob,
+  language: string = 'en'
+): Promise<TranscribeResponse> {
+  const url = `${BACKEND_URL}/api/voice/transcribe`;
+  
+  // Convert Blob to File for FormData
+  // Determine file extension based on blob type
+  let filename = 'recording.webm';
+  let mimeType = audioBlob.type || 'audio/webm';
+  
+  if (mimeType.includes('webm')) {
+    filename = 'recording.webm';
+  } else if (mimeType.includes('mp4') || mimeType.includes('m4a')) {
+    filename = 'recording.m4a';
+  } else if (mimeType.includes('wav')) {
+    filename = 'recording.wav';
+  } else if (mimeType.includes('ogg')) {
+    filename = 'recording.ogg';
+  }
+  
+  const audioFile = new File([audioBlob], filename, { type: mimeType });
+  
+  const formData = new FormData();
+  formData.append('audio', audioFile);
+  formData.append('language', language);
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to transcribe audio: ${response.status} ${errorText}`);
+    }
+
+    const data: TranscribeResponse = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error transcribing audio:', error);
+    throw error;
+  }
+}
+
+/**
  * Dashboard API Functions
  */
 

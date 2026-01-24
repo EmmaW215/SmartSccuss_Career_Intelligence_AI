@@ -3,12 +3,14 @@ import { Mic, MicOff, RefreshCw, Send, Play, Square, AlertCircle, Bot, LogIn, Lo
 import { InterviewType, Message } from '../types';
 import SimpleVisitorCounter from '../components/SimpleVisitorCounter';
 import { FileUploader } from '../components/interview/FileUploader';
+import { useMicrophone } from '../hooks/useMicrophone';
 import { 
   startInterviewSession, 
   sendInterviewMessage, 
   deleteInterviewSession,
   checkBackendHealth,
   uploadCustomizeInterviewFiles,
+  transcribeAudio,
   type MessageResponse 
 } from '../services/interviewService';
 import { useAuth } from '../contexts/AuthContext';
@@ -25,7 +27,6 @@ interface InterviewPageProps {
 export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onNavigateToDashboard }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -40,6 +41,19 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
   const [isUploading, setIsUploading] = useState(false);
   const [showFileUploader, setShowFileUploader] = useState(false);
   const [filesUploaded, setFilesUploaded] = useState(false);
+  
+  // Microphone hook for voice recording
+  const {
+    isMicAvailable,
+    permissionGranted,
+    deviceName,
+    error: micError,
+    isRecording,
+    checkMicrophone,
+    startRecording: startMicRecording,
+    stopRecording: stopMicRecording,
+    cancelRecording: cancelMicRecording
+  } = useMicrophone();
   
   const { user, login, isAuthenticated, isLoading, isPro, triggerLogin, triggerUpgrade } = useAuth();
 
@@ -103,6 +117,16 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
       // The actual cleanup will happen when sessionId changes (see separate useEffect)
     };
   }, [interviewType, isAuthenticated, user?.id]);
+
+  // Check microphone availability on mount (optional, non-blocking)
+  useEffect(() => {
+    if (isAuthenticated) {
+      checkMicrophone().catch(err => {
+        // Don't show error to user unless they try to use it
+        console.warn('Microphone check failed:', err);
+      });
+    }
+  }, [isAuthenticated, checkMicrophone]);
 
   // Cleanup session when component unmounts or interview type changes
   useEffect(() => {
@@ -198,8 +222,8 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
     }
   };
 
-  // Mock Speech-to-Text
-  const toggleRecording = () => {
+  // Real Speech-to-Text with microphone recording
+  const toggleRecording = async () => {
     if (!checkAccess()) return;
 
     // Special check for Customize Interview + Voice Input
@@ -208,11 +232,88 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
         return;
     }
 
-    if (isRecording) {
-      setIsRecording(false);
-      if (!input) setInput("I have extensive experience building RAG pipelines using Python and Pinecone.");
-    } else {
-      setIsRecording(true);
+    try {
+      if (isRecording) {
+        // Stop recording
+        setIsProcessing(true);
+        setError(null);
+        
+        try {
+          // Stop microphone recording and get audio blob
+          const audioBlob = await stopMicRecording();
+          
+          // Check if audio blob is valid
+          if (!audioBlob || audioBlob.size === 0) {
+            throw new Error('No audio recorded. Please try again.');
+          }
+          
+          // Transcribe audio to text
+          const transcribeResult = await transcribeAudio(audioBlob, 'en');
+          const transcribedText = transcribeResult.text.trim();
+          
+          if (transcribedText && transcribedText.length > 0) {
+            // Set transcribed text to input field
+            setInput(transcribedText);
+            
+            // Optional: You can uncomment this to auto-send after transcription
+            // await handleSend();
+          } else {
+            setError('No speech detected. Please try speaking again.');
+          }
+        } catch (transcribeError: any) {
+          console.error('Transcription error:', transcribeError);
+          
+          // Provide user-friendly error messages
+          if (transcribeError.message.includes('Failed to fetch') || transcribeError.message.includes('NetworkError')) {
+            setError('Network error. Please check your connection and try again.');
+          } else if (transcribeError.message.includes('503') || transcribeError.message.includes('not available')) {
+            setError('Voice service is temporarily unavailable. Please try typing your response instead.');
+          } else {
+            setError(transcribeError.message || 'Failed to transcribe audio. Please try typing your response.');
+          }
+        } finally {
+          setIsProcessing(false);
+        }
+      } else {
+        // Start recording
+        setError(null);
+        
+        try {
+          // Check microphone availability first
+          const micStatus = await checkMicrophone();
+          
+          if (!micStatus.available || !micStatus.permissionGranted) {
+            let errorMessage = micStatus.error || 'Microphone not available.';
+            
+            // Provide helpful guidance based on error type
+            if (micStatus.error?.includes('permission denied') || micStatus.error?.includes('NotAllowedError')) {
+              errorMessage = 'Microphone permission denied. Please allow microphone access in your browser settings and refresh the page.';
+            } else if (micStatus.error?.includes('No microphone found') || micStatus.error?.includes('NotFoundError')) {
+              errorMessage = 'No microphone found. Please connect a microphone and try again.';
+            } else if (micStatus.error?.includes('in use') || micStatus.error?.includes('NotReadableError')) {
+              errorMessage = 'Microphone is in use by another application. Please close other applications using the microphone.';
+            }
+            
+            setError(errorMessage);
+            return;
+          }
+          
+          // Start recording
+          await startMicRecording();
+        } catch (recordingError: any) {
+          console.error('Recording start error:', recordingError);
+          setError(recordingError.message || 'Failed to start recording. Please try again.');
+        }
+      }
+    } catch (error: any) {
+      console.error('Recording toggle error:', error);
+      setError(error.message || 'An error occurred. Please try again.');
+      setIsProcessing(false);
+      
+      // Cancel recording if it was started
+      if (isRecording) {
+        cancelMicRecording();
+      }
     }
   };
 
@@ -641,7 +742,7 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
 
             <button 
                 onClick={toggleRecording}
-                disabled={!backendAvailable}
+                disabled={!backendAvailable || isProcessing || (!permissionGranted && !isRecording && !micError)}
                 className={`p-3 rounded-full transition-all duration-300 shadow-md disabled:opacity-50 disabled:cursor-not-allowed ${
                     isRecording 
                     ? 'bg-red-500 text-white animate-pulse ring-4 ring-red-100' 
@@ -653,9 +754,34 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
                 {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
             </button>
         </div>
-        <div className="text-center mt-2 text-xs text-gray-400 flex items-center justify-center gap-1">
-            {interviewType === InterviewType.CUSTOMIZE && !isPro && <Lock size={10} />}
-            {isRecording ? "Listening..." : interviewType === InterviewType.CUSTOMIZE && !isPro ? "Voice input: Pro Only" : "Press microphone to speak"}
+        <div className="text-center mt-2 text-xs text-gray-400 flex items-center justify-center gap-1 flex-col">
+            {isRecording ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                  <span>Recording... Click to stop</span>
+                </div>
+              </>
+            ) : isProcessing ? (
+              <span className="flex items-center gap-2">
+                <RefreshCw size={12} className="animate-spin" />
+                Processing audio...
+              </span>
+            ) : interviewType === InterviewType.CUSTOMIZE && !isPro ? (
+              <>
+                <Lock size={10} />
+                <span>Voice input: Pro Only</span>
+              </>
+            ) : micError && !permissionGranted ? (
+              <span className="text-orange-500">Microphone not available</span>
+            ) : (
+              <span>Press microphone to speak</span>
+            )}
+            {micError && !isRecording && !isProcessing && (
+              <span className="text-xs text-red-500 mt-1 max-w-md text-center">
+                {micError.includes('permission') ? 'Allow microphone access in browser settings' : micError}
+              </span>
+            )}
         </div>
       </div>
     </div>

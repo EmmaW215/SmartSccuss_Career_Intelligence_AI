@@ -22,7 +22,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onEnterApp, onNavigate
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
-          opacity: 0.1
+          opacity: 0.07
         }}
       />
       
