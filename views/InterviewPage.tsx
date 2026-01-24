@@ -62,9 +62,26 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
   
   const { user, login, isAuthenticated, isLoading, isPro, triggerLogin, triggerUpgrade } = useAuth();
 
+  // Show login prompt if not authenticated (similar to Dashboard)
+  if (!isAuthenticated) {
+    return (
+      <div className="h-full overflow-y-auto bg-gray-50/50 p-8 flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">Please Login</h2>
+          <p className="text-gray-600 mb-6">You need to be logged in to initiate your Mock Interview.</p>
+          <button
+            onClick={triggerLogin}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Initialize interview session when component mounts or interview type changes
   useEffect(() => {
-    if (!isAuthenticated) return;
 
     const initializeSession = async () => {
       try {
