@@ -187,17 +187,13 @@ Rules:
         )
     
     def _customize_greeting(self, name: Optional[str], context: ConversationContext) -> str:
-        n = f" {name}" if name else ""
-        job = ""
-        if context.job_context and context.job_context.get("title"):
-            job = f" for the {context.job_context['title']} position"
-        
         return (
-            f"Welcome{n}! I'm Alex, and I'm excited to have this personalized interview with you. "
-            f"I've reviewed the materials you shared and prepared questions tailored to your background{job}. "
-            f"We'll cover 3 screening questions, 3 behavioral questions, and 4 technical questions. "
-            f"This should take about 45 minutes. Take your time... there's no rush. "
-            f"Ready? Let's begin..."
+            "Welcome to have this Interview with me here! 🎯 "
+            "I'm your AI interviewer today. "
+            "This is a 45-minute deep-dive into your personal technical and soft skills, according to your own experience. "
+            "We'll cover: 3 Screening questions, 3 soft skill questions, and 4 technical questions. "
+            "Now, please tell me know a little bit more about you: "
+            "Please send me your latest resume, the job descriptions which you'd like to apply right now, and any of the other information you think I should know about you here in attachment."
         )
     
     async def process_response(
