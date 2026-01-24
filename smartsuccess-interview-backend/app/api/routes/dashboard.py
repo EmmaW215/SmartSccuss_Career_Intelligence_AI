@@ -81,21 +81,29 @@ async def get_interview_history(
                 service = service_getter()
                 for session_id, base_session in service.sessions.items():
                     if base_session.user_id == user_id:
+                        # Safely access phase and interview_type (handle both Enum and string)
+                        from enum import Enum
+                        phase_value = base_session.phase.value if isinstance(base_session.phase, Enum) else str(base_session.phase)
+                        interview_type_value = base_session.interview_type.value if isinstance(base_session.interview_type, Enum) else str(base_session.interview_type)
+                        
                         # Check status filter
                         if status:
-                            if status == "completed" and base_session.phase.value != "completed":
+                            if status == "completed" and phase_value != "completed":
                                 continue
-                            elif status == "in_progress" and base_session.phase.value != "in_progress":
+                            elif status == "in_progress" and phase_value != "in_progress":
                                 continue
                         
                         # Check if already in history
                         if any(h["session_id"] == session_id for h in history):
                             continue
                         
+                        # Normalize interview_type format
+                        interview_type_str = interview_type_value.lower().replace(" interview", "")
+                        
                         history.append({
                             "session_id": base_session.session_id,
-                            "interview_type": base_session.interview_type.value.lower().replace(" interview", ""),
-                            "status": "completed" if base_session.phase.value == "completed" else "in_progress",
+                            "interview_type": interview_type_str,
+                            "status": "completed" if phase_value == "completed" else "in_progress",
                             "questions_answered": len(base_session.responses),
                             "total_questions": len(base_session.questions_asked),
                             "voice_enabled": False,
@@ -152,18 +160,37 @@ async def get_user_stats(
                             # Note: InterviewStatus is already imported globally at top of file
                             from app.services.session_store import InterviewSession as StoreSession
                             from app.models import InterviewPhase
+                            from enum import Enum
                             
-                            status_map = {
-                                InterviewPhase.COMPLETED: InterviewStatus.COMPLETED,
-                                InterviewPhase.IN_PROGRESS: InterviewStatus.IN_PROGRESS,
-                                InterviewPhase.GREETING: InterviewStatus.PENDING
-                            }
-                            temp_status = status_map.get(base_session.phase, InterviewStatus.PENDING)
+                            # Safely access phase and interview_type (handle both Enum and string)
+                            phase_value = base_session.phase.value if isinstance(base_session.phase, Enum) else str(base_session.phase)
+                            interview_type_value = base_session.interview_type.value if isinstance(base_session.interview_type, Enum) else str(base_session.interview_type)
+                            
+                            # Map phase to status (handle both Enum and string)
+                            if isinstance(base_session.phase, Enum):
+                                status_map = {
+                                    InterviewPhase.COMPLETED: InterviewStatus.COMPLETED,
+                                    InterviewPhase.IN_PROGRESS: InterviewStatus.IN_PROGRESS,
+                                    InterviewPhase.GREETING: InterviewStatus.PENDING
+                                }
+                                temp_status = status_map.get(base_session.phase, InterviewStatus.PENDING)
+                            else:
+                                # If phase is already a string, map directly
+                                phase_str = str(base_session.phase).lower()
+                                if phase_str == "completed":
+                                    temp_status = InterviewStatus.COMPLETED
+                                elif phase_str == "in_progress":
+                                    temp_status = InterviewStatus.IN_PROGRESS
+                                else:
+                                    temp_status = InterviewStatus.PENDING
+                            
+                            # Normalize interview_type format
+                            interview_type_str = interview_type_value.lower().replace(" interview", "")
                             
                             temp_session = StoreSession(
                                 session_id=base_session.session_id,
                                 user_id=base_session.user_id,
-                                interview_type=base_session.interview_type.value.lower().replace(" interview", ""),
+                                interview_type=interview_type_str,
                                 status=temp_status,
                                 current_question_index=base_session.current_question_index,
                                 questions=[],
@@ -293,14 +320,32 @@ async def generate_interview_report(
                     # Note: InterviewStatus is already imported globally at top of file
                     from app.services.session_store import InterviewSession as StoreSession
                     from app.models import InterviewPhase
+                    from enum import Enum
                     
-                    # Map phase to status
-                    status_map = {
-                        InterviewPhase.COMPLETED: InterviewStatus.COMPLETED,
-                        InterviewPhase.IN_PROGRESS: InterviewStatus.IN_PROGRESS,
-                        InterviewPhase.GREETING: InterviewStatus.PENDING
-                    }
-                    status = status_map.get(base_session.phase, InterviewStatus.PENDING)
+                    # Safely access phase (handle both Enum and string)
+                    phase_value = base_session.phase.value if isinstance(base_session.phase, Enum) else str(base_session.phase)
+                    interview_type_value = base_session.interview_type.value if isinstance(base_session.interview_type, Enum) else str(base_session.interview_type)
+                    
+                    # Map phase to status (handle both Enum and string)
+                    if isinstance(base_session.phase, Enum):
+                        status_map = {
+                            InterviewPhase.COMPLETED: InterviewStatus.COMPLETED,
+                            InterviewPhase.IN_PROGRESS: InterviewStatus.IN_PROGRESS,
+                            InterviewPhase.GREETING: InterviewStatus.PENDING
+                        }
+                        status = status_map.get(base_session.phase, InterviewStatus.PENDING)
+                    else:
+                        # If phase is already a string, map directly
+                        phase_str = str(base_session.phase).lower()
+                        if phase_str == "completed":
+                            status = InterviewStatus.COMPLETED
+                        elif phase_str == "in_progress":
+                            status = InterviewStatus.IN_PROGRESS
+                        else:
+                            status = InterviewStatus.PENDING
+                    
+                    # Normalize interview_type format
+                    interview_type_str = interview_type_value.lower().replace(" interview", "")
                     
                     # Convert questions and responses
                     questions = [{"question": q, "question_index": i, "category": "general"} 
@@ -342,7 +387,7 @@ async def generate_interview_report(
                     session = StoreSession(
                         session_id=base_session.session_id,
                         user_id=base_session.user_id,
-                        interview_type=base_session.interview_type.value.lower().replace(" interview", ""),
+                        interview_type=interview_type_str,
                         status=status,
                         current_question_index=base_session.current_question_index,
                         questions=questions,

@@ -271,6 +271,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onBack }) => {
         });
 
         setFeedbacks(feedbacksMap);
+        setIsLoading(false); // ✅ Fix: Set loading to false on success
       } catch (err: any) {
         console.error('Error fetching dashboard data:', err);
         
