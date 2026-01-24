@@ -3,7 +3,7 @@
  * Handles all communication with the SmartSuccess Interview Backend
  */
 
-import { InterviewType } from '../types';
+import { InterviewType, DashboardStats, DashboardHistory, SessionFeedback } from '../types';
 
 // Get backend URL from environment or use default
 // Vite injects process.env variables at build time via vite.config.ts
@@ -329,5 +329,98 @@ export async function checkBackendHealth(): Promise<boolean> {
   } catch (error) {
     console.error('Backend health check failed:', error);
     return false;
+  }
+}
+
+/**
+ * Dashboard API Functions
+ */
+
+/**
+ * Get user's interview statistics
+ */
+export async function getDashboardStats(userId: string): Promise<DashboardStats> {
+  const url = `${BACKEND_URL}/api/dashboard/stats/${userId}`;
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to get dashboard stats: ${response.status} ${errorText}`);
+    }
+
+    const data: DashboardStats = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error getting dashboard stats:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get user's interview history
+ */
+export async function getDashboardHistory(
+  userId: string,
+  limit: number = 10,
+  status?: string
+): Promise<DashboardHistory> {
+  const params = new URLSearchParams();
+  if (limit) params.append('limit', limit.toString());
+  if (status) params.append('status', status);
+  
+  const url = `${BACKEND_URL}/api/dashboard/history/${userId}?${params.toString()}`;
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to get dashboard history: ${response.status} ${errorText}`);
+    }
+
+    const data: DashboardHistory = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error getting dashboard history:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get detailed feedback for a specific session
+ */
+export async function getSessionFeedback(sessionId: string): Promise<SessionFeedback> {
+  const url = `${BACKEND_URL}/api/dashboard/session/${sessionId}/feedback`;
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to get session feedback: ${response.status} ${errorText}`);
+    }
+
+    const data: SessionFeedback = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error getting session feedback:', error);
+    throw error;
   }
 }
