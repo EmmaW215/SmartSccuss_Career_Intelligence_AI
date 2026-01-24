@@ -273,9 +273,32 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onBack }) => {
         setFeedbacks(feedbacksMap);
       } catch (err: any) {
         console.error('Error fetching dashboard data:', err);
-        setError(err.message || 'Failed to load dashboard data. Please try again.');
-      } finally {
+        
+        // Improved error handling with specific messages
+        let errorMessage = 'Failed to load dashboard data.';
+        
+        if (err.message && err.message.includes('CORS')) {
+          errorMessage = 'Server configuration issue. Please contact support or try again later.';
+        } else if (err.message && err.message.includes('Failed to fetch')) {
+          errorMessage = 'Unable to connect to server. Please check your internet connection.';
+        } else if (err.status === 404) {
+          errorMessage = 'No interview data found. Complete an interview to see your analytics.';
+        } else if (err.status === 503) {
+          errorMessage = 'Service temporarily unavailable. Please try again in a moment.';
+        } else {
+          errorMessage = err.message || 'Failed to load dashboard data. Please try again.';
+        }
+        
+        setError(errorMessage);
         setIsLoading(false);
+        
+        // Auto-retry logic for network errors
+        if (retryCount < maxRetries && (err.message?.includes('Failed to fetch') || err.message?.includes('CORS'))) {
+          console.log(`Retrying dashboard fetch (attempt ${retryCount + 1}/${maxRetries})...`);
+          setTimeout(() => {
+            fetchDashboardData(retryCount + 1);
+          }, retryDelay * (retryCount + 1)); // Exponential backoff
+        }
       }
     };
 
