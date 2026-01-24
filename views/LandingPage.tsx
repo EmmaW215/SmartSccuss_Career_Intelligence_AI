@@ -13,7 +13,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onEnterApp, onNavigate
   const { user, login, isLoading, isAuthenticated } = useAuth();
 
   return (
-    <div className="min-h-screen flex flex-col font-sans text-gray-800 bg-white">
+    <div className="min-h-screen flex flex-col font-sans text-gray-800 bg-white relative">
+      {/* Background Image */}
+      <div 
+        className="fixed inset-0 z-0"
+        style={{
+          backgroundImage: 'url(/Job_Search_Pic.png)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+          opacity: 0.3
+        }}
+      />
+      
+      {/* Content Container with z-index to appear above background */}
+      <div className="relative z-10 flex flex-col min-h-screen">
       {/* Navigation */}
       <nav className="w-full px-8 py-5 flex justify-between items-center bg-white/80 backdrop-blur-md sticky top-0 z-50 border-b border-gray-100">
         <div className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent cursor-pointer" onClick={() => onNavigateToView('landing')}>
@@ -118,6 +132,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onEnterApp, onNavigate
       <footer className="py-12 border-t border-gray-100 text-center text-gray-400 text-sm">
         <p>© 2024 SmartSuccess.AI. Empowering AI Careers.</p>
       </footer>
+      </div>
     </div>
   );
 };
