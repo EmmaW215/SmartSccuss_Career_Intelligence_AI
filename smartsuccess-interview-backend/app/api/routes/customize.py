@@ -117,9 +117,7 @@ async def upload_documents(
 @router.post("/start")
 async def start_customize_interview(
     request: Request,
-    body: StartCustomInterviewRequest,
-    profile: Optional[dict] = None,
-    rag_id: Optional[str] = None
+    body: StartCustomInterviewRequest
 ):
     """Start a custom interview (after upload/build)"""
     # Check if Phase 2 features are enabled
@@ -142,31 +140,25 @@ async def start_customize_interview(
     # Check GPU availability
     status = await gpu_client.check_health()
     
-    # If we have a profile, use it; otherwise use default questions
-    if profile:
-        questions = select_customize_questions(profile)
-    else:
-        # Fallback to standard mix
-        questions = select_customize_questions({})
+    # Use default questions (profile can be added later via upload endpoint)
+    questions = select_customize_questions({})
     
     job_context = None
-    if profile and profile.get("job_target"):
-        job_context = profile["job_target"]
     
     session = session_store.create_session(
         user_id=body.user_id,
         interview_type="customize",
         questions=questions,
         voice_enabled=body.voice_enabled and status.get("available", False),
-        custom_profile=profile,
-        custom_rag_id=rag_id
+        custom_profile=None,  # Can be set after file upload
+        custom_rag_id=None
     )
     
     context = conversation_engine.create_context(
         session_id=session.session_id,
         user_id=body.user_id,
         interview_type="customize",
-        user_profile=profile,
+        user_profile=None,
         job_context=job_context
     )
     
@@ -186,7 +178,7 @@ async def start_customize_interview(
         "total_questions": len(questions),
         "voice_enabled": session.voice_enabled,
         "interview_type": "customize",
-        "profile_used": profile is not None,
+        "profile_used": False,
         "gpu_available": status.get("available", False)
     }
 
