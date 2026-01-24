@@ -108,7 +108,7 @@ function getInterviewTypePath(type: InterviewType): string {
     [InterviewType.SCREENING]: 'screening',
     [InterviewType.BEHAVIORAL]: 'behavioral',
     [InterviewType.TECHNICAL]: 'technical',
-    [InterviewType.CUSTOMIZE]: 'screening', // Fallback to screening for customize
+    [InterviewType.CUSTOMIZE]: 'customize', // Use customize API endpoint
   };
   return typeMap[type] || 'screening';
 }
@@ -126,16 +126,28 @@ export async function startInterviewSession(
   const url = `${BACKEND_URL}/api/interview/${interviewType}/start`;
 
   try {
+    // Customize Interview uses different request format
+    let requestBody: any;
+    if (type === InterviewType.CUSTOMIZE) {
+      requestBody = {
+        user_id: userId,
+        user_name: undefined, // Can be added later if needed
+        voice_enabled: false, // Can be enabled later if needed
+      };
+    } else {
+      requestBody = {
+        user_id: userId,
+        resume_text: resumeText || undefined,
+        job_description: jobDescription || undefined,
+      };
+    }
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        user_id: userId,
-        resume_text: resumeText || undefined,
-        job_description: jobDescription || undefined,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -144,6 +156,18 @@ export async function startInterviewSession(
     }
 
     const data: StartSessionResponse = await response.json();
+    
+    // Normalize response format for Customize Interview
+    if (type === InterviewType.CUSTOMIZE) {
+      return {
+        session_id: data.session_id,
+        interview_type: data.interview_type || 'customize',
+        greeting: data.greeting,
+        duration_limit_minutes: 45, // Customize interview duration
+        max_questions: data.total_questions || 10, // Use total_questions from customize response
+      };
+    }
+    
     return data;
   } catch (error) {
     console.error('Error starting interview session:', error);
@@ -160,7 +184,24 @@ export async function sendInterviewMessage(
   message: string
 ): Promise<MessageResponse> {
   const interviewType = getInterviewTypePath(type);
-  const url = `${BACKEND_URL}/api/interview/${interviewType}/message`;
+  
+  // Customize Interview uses different endpoint and format
+  let url: string;
+  let requestBody: any;
+  
+  if (type === InterviewType.CUSTOMIZE) {
+    url = `${BACKEND_URL}/api/interview/customize/respond`;
+    requestBody = {
+      session_id: sessionId,
+      user_response: message,
+    };
+  } else {
+    url = `${BACKEND_URL}/api/interview/${interviewType}/message`;
+    requestBody = {
+      session_id: sessionId,
+      message: message,
+    };
+  }
 
   try {
     const response = await fetch(url, {
@@ -168,10 +209,7 @@ export async function sendInterviewMessage(
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        session_id: sessionId,
-        message: message,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -179,8 +217,21 @@ export async function sendInterviewMessage(
       throw new Error(`Failed to send message: ${response.status} ${errorText}`);
     }
 
-    const data: MessageResponse = await response.json();
-    return data;
+    const data: any = await response.json();
+    
+    // Normalize Customize Interview response format
+    if (type === InterviewType.CUSTOMIZE) {
+      return {
+        type: data.is_complete ? 'completion' : 'question',
+        message: data.ai_response || data.message || '',
+        question_number: data.current_question || data.question_number,
+        total_questions: data.total_questions,
+        evaluation: undefined, // Customize interview may not have evaluation yet
+        summary: data.is_complete ? data : undefined,
+      };
+    }
+    
+    return data as MessageResponse;
   } catch (error) {
     console.error('Error sending interview message:', error);
     throw error;
@@ -226,7 +277,16 @@ export async function deleteInterviewSession(
   sessionId: string
 ): Promise<void> {
   const interviewType = getInterviewTypePath(type);
-  const url = `${BACKEND_URL}/api/interview/${interviewType}/session/${sessionId}`;
+  
+  // Customize Interview may use different endpoint or may not have delete endpoint
+  // For now, try the standard endpoint, but don't fail if it doesn't exist
+  let url: string;
+  if (type === InterviewType.CUSTOMIZE) {
+    // Customize interview uses dashboard API for deletion
+    url = `${BACKEND_URL}/api/dashboard/session/${sessionId}`;
+  } else {
+    url = `${BACKEND_URL}/api/interview/${interviewType}/session/${sessionId}`;
+  }
 
   try {
     const response = await fetch(url, {
@@ -236,11 +296,22 @@ export async function deleteInterviewSession(
       },
     });
 
+    // For Customize Interview, 404 is acceptable (session may not exist in Phase 2 store)
+    if (!response.ok && type === InterviewType.CUSTOMIZE && response.status === 404) {
+      console.log('Customize session not found (may have been cleaned up)');
+      return;
+    }
+
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`Failed to delete session: ${response.status} ${errorText}`);
     }
   } catch (error) {
+    // For Customize Interview, log but don't throw (session may not exist)
+    if (type === InterviewType.CUSTOMIZE) {
+      console.log('Error deleting customize session (non-critical):', error);
+      return;
+    }
     console.error('Error deleting interview session:', error);
     throw error;
   }

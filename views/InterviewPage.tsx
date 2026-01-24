@@ -12,17 +12,8 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 
 // Phase 2: Optional hooks (only used if available)
-let useMicrophone: any = null;
-let useAudioPlayer: any = null;
-try {
-  const micModule = require('../hooks/useMicrophone');
-  const audioModule = require('../hooks/useAudioPlayer');
-  useMicrophone = micModule.useMicrophone || micModule.default;
-  useAudioPlayer = audioModule.useAudioPlayer || audioModule.default;
-} catch (e) {
-  // Phase 2 hooks not available, continue without them
-  console.log('Phase 2 hooks not available, using text-only mode');
-}
+// Note: Hooks are imported dynamically when needed, not at module level
+// This prevents build errors if hooks are not available
 
 interface InterviewPageProps {
   interviewType: InterviewType;
