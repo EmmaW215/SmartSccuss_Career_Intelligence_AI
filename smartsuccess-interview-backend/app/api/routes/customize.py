@@ -229,6 +229,17 @@ async def submit_response(
         next_question=next_question
     )
     
+    # Check if user requested to end interview early
+    if result.get("is_complete") or result.get("should_end"):
+        closing = result.get("ai_response") or await conversation_engine.generate_closing(context)
+        session_store.complete_session(body.session_id)
+        return {
+            "ai_response": closing,
+            "is_complete": True,
+            "feedback_hint": result.get("feedback_hint"),
+            "session_id": body.session_id
+        }
+    
     session_store.add_response(
         session_id=body.session_id,
         question_index=session.current_question_index,

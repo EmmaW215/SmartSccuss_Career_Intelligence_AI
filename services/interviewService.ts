@@ -63,6 +63,7 @@ export interface MessageResponse {
   message: string;
   question_number?: number;
   total_questions?: number;
+  is_complete?: boolean;
   evaluation?: {
     score?: number;
     feedback?: string;
@@ -226,6 +227,7 @@ export async function sendInterviewMessage(
         message: data.ai_response || data.message || '',
         question_number: data.current_question || data.question_number,
         total_questions: data.total_questions,
+        is_complete: data.is_complete || false,
         evaluation: undefined, // Customize interview may not have evaluation yet
         summary: data.is_complete ? data : undefined,
       };
@@ -496,6 +498,40 @@ export interface UploadFilesResponse {
   rag_id?: string;
 }
 
+/**
+ * Interview Report
+ */
+export interface InterviewReport {
+  session_id: string;
+  user_id: string;
+  interview_type: string;
+  completed_at: string | null;
+  duration_minutes: number | null;
+  questions_answered: number;
+  total_questions: number;
+  conversation_history: Array<{
+    question_index: number;
+    question: string;
+    user_response: string;
+    ai_response: string;
+    timestamp?: string;
+  }>;
+  responses_summary: Array<{
+    question: string;
+    user_response_length: number;
+    has_feedback: boolean;
+  }>;
+  feedback_analysis: {
+    good_responses: number;
+    fair_responses: number;
+    needs_improvement: number;
+    overall_score: number;
+  };
+  strengths: string[];
+  areas_for_improvement: string[];
+  recommendations: string[];
+}
+
 export async function uploadCustomizeInterviewFiles(
   userId: string,
   files: File[]
@@ -524,6 +560,33 @@ export async function uploadCustomizeInterviewFiles(
     return data;
   } catch (error) {
     console.error('Error uploading files:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get interview report for a completed session
+ */
+export async function getInterviewReport(sessionId: string): Promise<InterviewReport> {
+  const url = `${BACKEND_URL}/api/dashboard/session/${sessionId}/report`;
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to get interview report: ${response.status} ${errorText}`);
+    }
+
+    const data: InterviewReport = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error getting interview report:', error);
     throw error;
   }
 }

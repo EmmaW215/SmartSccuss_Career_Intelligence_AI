@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, RefreshCw, Send, Play, Square, AlertCircle, Bot, LogIn, Lock, CheckCircle, User, Crown, Star, TrendingUp, Upload, X } from 'lucide-react';
+import { Mic, MicOff, RefreshCw, Send, Play, Square, AlertCircle, Bot, LogIn, Lock, CheckCircle, User, Crown, Star, TrendingUp, Upload, X, FileText, XCircle } from 'lucide-react';
 import { InterviewType, Message } from '../types';
 import SimpleVisitorCounter from '../components/SimpleVisitorCounter';
 import { FileUploader } from '../components/interview/FileUploader';
@@ -11,7 +11,9 @@ import {
   checkBackendHealth,
   uploadCustomizeInterviewFiles,
   transcribeAudio,
-  type MessageResponse 
+  getInterviewReport,
+  type MessageResponse,
+  type InterviewReport
 } from '../services/interviewService';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -34,6 +36,9 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
   const [currentQuestionNumber, setCurrentQuestionNumber] = useState<number>(0);
   const [totalQuestions, setTotalQuestions] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
+  const [isInterviewComplete, setIsInterviewComplete] = useState(false);
+  const [interviewReport, setInterviewReport] = useState<InterviewReport | null>(null);
+  const [showReport, setShowReport] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   // File upload state (for Customize Interview)
@@ -200,9 +205,34 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
       speak(response.message);
 
       // Handle interview completion
-      if (response.type === 'completion' && response.summary) {
-        // Interview completed - could navigate to results page
-        console.log('Interview completed:', response.summary);
+      if (response.type === 'completion' || response.is_complete) {
+        setIsInterviewComplete(true);
+        
+        // Interview completed
+        const completionMsg: Message = {
+          id: `completion-${Date.now()}`,
+          role: 'ai',
+          content: response.message || 'Thank you for completing the interview! Your feedback report is being generated.',
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, completionMsg]);
+        
+        // Fetch and display report
+        if (sessionId) {
+          try {
+            const report = await getInterviewReport(sessionId);
+            setInterviewReport(report);
+            setShowReport(true);
+          } catch (reportError: any) {
+            console.error('Failed to fetch report:', reportError);
+            // Don't show error to user, just log it
+          }
+        }
+        
+        // Show completion notification
+        if (response.summary) {
+          console.log('Interview completed:', response.summary);
+        }
       }
 
     } catch (error: any) {
@@ -383,6 +413,9 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
       setUploadedFiles([]);
       setFilesUploaded(false);
       setShowFileUploader(false);
+      setIsInterviewComplete(false);
+      setInterviewReport(null);
+      setShowReport(false);
 
       // Reinitialize session
       const userId = user?.id || `user_${Date.now()}`;
@@ -552,6 +585,135 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
           </button>
         </div>
       </div>
+
+      {/* Interview Completion Banner */}
+      {isInterviewComplete && (
+        <div className="mx-8 mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+          <div className="flex items-start justify-between">
+            <div className="flex items-start gap-3 flex-1">
+              <CheckCircle size={20} className="text-green-600 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-green-800 mb-1">Interview Completed! 🎉</h3>
+                <p className="text-sm text-green-700 mb-3">
+                  Your interview has been completed. View your detailed feedback report below or check your dashboard for analytics.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowReport(!showReport)}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2"
+                  >
+                    <FileText size={16} />
+                    {showReport ? 'Hide Report' : 'View Report'}
+                  </button>
+                  <button
+                    onClick={onNavigateToDashboard}
+                    className="px-4 py-2 bg-white border border-green-300 text-green-700 rounded-lg hover:bg-green-50 transition-colors text-sm font-medium"
+                  >
+                    Go to Dashboard
+                  </button>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setIsInterviewComplete(false);
+                setShowReport(false);
+              }}
+              className="text-green-400 hover:text-green-600"
+            >
+              <XCircle size={20} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Interview Report Modal */}
+      {showReport && interviewReport && (
+        <div className="mx-8 mt-4 p-6 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[600px] overflow-y-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-gray-800">Interview Report</h3>
+            <button
+              onClick={() => setShowReport(false)}
+              className="text-gray-400 hover:text-gray-600"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          
+          {/* Report Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-blue-50 p-3 rounded-lg">
+              <p className="text-xs text-gray-600">Questions Answered</p>
+              <p className="text-2xl font-bold text-blue-600">{interviewReport.questions_answered}</p>
+            </div>
+            <div className="bg-green-50 p-3 rounded-lg">
+              <p className="text-xs text-gray-600">Overall Score</p>
+              <p className="text-2xl font-bold text-green-600">{interviewReport.feedback_analysis.overall_score}%</p>
+            </div>
+            <div className="bg-purple-50 p-3 rounded-lg">
+              <p className="text-xs text-gray-600">Duration</p>
+              <p className="text-2xl font-bold text-purple-600">{interviewReport.duration_minutes?.toFixed(0) || 'N/A'}m</p>
+            </div>
+            <div className="bg-orange-50 p-3 rounded-lg">
+              <p className="text-xs text-gray-600">Good Responses</p>
+              <p className="text-2xl font-bold text-orange-600">{interviewReport.feedback_analysis.good_responses}</p>
+            </div>
+          </div>
+
+          {/* Strengths */}
+          {interviewReport.strengths.length > 0 && (
+            <div className="mb-6">
+              <h4 className="text-sm font-semibold text-gray-800 mb-2">Strengths</h4>
+              <ul className="list-disc list-inside space-y-1 text-sm text-gray-700">
+                {interviewReport.strengths.map((strength, idx) => (
+                  <li key={idx}>{strength}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Areas for Improvement */}
+          {interviewReport.areas_for_improvement.length > 0 && (
+            <div className="mb-6">
+              <h4 className="text-sm font-semibold text-gray-800 mb-2">Areas for Improvement</h4>
+              <ul className="list-disc list-inside space-y-1 text-sm text-gray-700">
+                {interviewReport.areas_for_improvement.map((area, idx) => (
+                  <li key={idx}>{area}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Recommendations */}
+          {interviewReport.recommendations.length > 0 && (
+            <div className="mb-6">
+              <h4 className="text-sm font-semibold text-gray-800 mb-2">Recommendations</h4>
+              <ul className="list-disc list-inside space-y-1 text-sm text-gray-700">
+                {interviewReport.recommendations.map((rec, idx) => (
+                  <li key={idx}>{rec}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Conversation History (Collapsible) */}
+          <details className="mt-4">
+            <summary className="cursor-pointer text-sm font-semibold text-gray-800 hover:text-blue-600">
+              View Full Conversation History ({interviewReport.conversation_history.length} exchanges)
+            </summary>
+            <div className="mt-3 space-y-4 max-h-[300px] overflow-y-auto">
+              {interviewReport.conversation_history.map((exchange, idx) => (
+                <div key={idx} className="border-l-2 border-blue-200 pl-3 py-2">
+                  <p className="text-xs font-semibold text-gray-600 mb-1">Question {exchange.question_index}:</p>
+                  <p className="text-sm text-gray-800 mb-2">{exchange.question}</p>
+                  <p className="text-xs font-semibold text-gray-600 mb-1">Your Response:</p>
+                  <p className="text-sm text-gray-700">{exchange.user_response}</p>
+                </div>
+              ))}
+            </div>
+          </details>
+        </div>
+      )}
 
       {/* Error Banner */}
       {error && (

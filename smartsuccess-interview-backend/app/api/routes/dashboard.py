@@ -152,3 +152,115 @@ async def get_session_feedback(
         }
     
     return feedback
+
+
+@router.get("/session/{session_id}/report")
+async def generate_interview_report(
+    request: Request,
+    session_id: str
+):
+    """Generate comprehensive interview report for a completed session"""
+    session_store = get_session_store(request)
+    if not session_store:
+        raise HTTPException(status_code=503, detail="Session store not available")
+    
+    session = session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    if session.status != InterviewStatus.COMPLETED:
+        raise HTTPException(
+            status_code=400, 
+            detail="Report can only be generated for completed interviews"
+        )
+    
+    # Compile comprehensive report
+    report = {
+        "session_id": session_id,
+        "user_id": session.user_id,
+        "interview_type": session.interview_type,
+        "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+        "duration_minutes": None,
+        "questions_answered": len(session.responses),
+        "total_questions": len(session.questions),
+        "conversation_history": [],
+        "responses_summary": [],
+        "feedback_analysis": {
+            "good_responses": 0,
+            "fair_responses": 0,
+            "needs_improvement": 0,
+            "overall_score": 0
+        },
+        "strengths": [],
+        "areas_for_improvement": [],
+        "recommendations": []
+    }
+    
+    # Calculate duration
+    if session.created_at and session.completed_at:
+        duration = (session.completed_at - session.created_at).total_seconds() / 60
+        report["duration_minutes"] = round(duration, 1)
+    
+    # Build conversation history
+    for i, response in enumerate(session.responses):
+        question = response.get("question", {})
+        if isinstance(question, dict):
+            question_text = question.get("question", "")
+        else:
+            question_text = str(question) if question else ""
+        
+        report["conversation_history"].append({
+            "question_index": i + 1,
+            "question": question_text,
+            "user_response": response.get("user_response", ""),
+            "ai_response": response.get("ai_response", ""),
+            "timestamp": response.get("timestamp")
+        })
+        
+        report["responses_summary"].append({
+            "question": question_text[:100] + "..." if len(question_text) > 100 else question_text,
+            "user_response_length": len(response.get("user_response", "")),
+            "has_feedback": response.get("feedback_hint") is not None
+        })
+    
+    # Analyze feedback hints
+    good_count = sum(1 for h in session.feedback_hints if h.get("quality") == "good")
+    fair_count = sum(1 for h in session.feedback_hints if h.get("quality") == "fair")
+    needs_improvement = sum(1 for h in session.feedback_hints if h.get("quality") == "needs_improvement")
+    
+    total_hints = len(session.feedback_hints)
+    if total_hints > 0:
+        overall_score = round((good_count * 100 + fair_count * 70 + needs_improvement * 40) / total_hints, 1)
+        report["feedback_analysis"] = {
+            "good_responses": good_count,
+            "fair_responses": fair_count,
+            "needs_improvement": needs_improvement,
+            "overall_score": overall_score
+        }
+        
+        # Generate recommendations based on feedback
+        if needs_improvement > good_count:
+            report["recommendations"].append("Focus on providing more detailed and specific examples in your responses")
+            report["recommendations"].append("Practice structuring your answers with clear context and outcomes")
+        if fair_count > good_count:
+            report["recommendations"].append("Work on being more concise while maintaining clarity")
+            report["recommendations"].append("Consider preparing STAR method responses for behavioral questions")
+        
+        # Extract strengths and improvements from feedback hints
+        for hint in session.feedback_hints:
+            hint_text = hint.get("hint", "")
+            if hint.get("quality") == "good" and hint_text:
+                report["strengths"].append(hint_text)
+            elif hint.get("quality") == "needs_improvement" and hint_text:
+                report["areas_for_improvement"].append(hint_text)
+    
+    # Limit lists to top items
+    report["strengths"] = report["strengths"][:5]
+    report["areas_for_improvement"] = report["areas_for_improvement"][:5]
+    report["recommendations"] = report["recommendations"][:5] if report["recommendations"] else [
+        "Continue practicing to improve your interview skills",
+        "Review your responses and identify areas for improvement",
+        "Consider doing more mock interviews to build confidence"
+    ]
+    
+    return report

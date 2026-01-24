@@ -166,6 +166,13 @@ class BaseInterviewService(ABC):
         user_message: str
     ) -> MessageResponse:
         """Handle responses during the interview"""
+        # Check if user wants to end interview early
+        user_lower = user_message.lower().strip()
+        end_keywords = ['stop', 'end', 'finish', 'done', "that's all", 'that is all', 'i\'m done', 'i am done', 'i want to stop', 'i want to end']
+        if any(keyword in user_lower for keyword in end_keywords):
+            # Complete interview early
+            return await self._complete_interview(session)
+        
         # Evaluate the response
         evaluation = await self._evaluate_response(session, user_message)
         
