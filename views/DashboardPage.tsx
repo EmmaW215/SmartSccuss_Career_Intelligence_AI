@@ -233,7 +233,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onBack }) => {
       return;
     }
 
-    const fetchDashboardData = async () => {
+    const fetchDashboardData = async (retryCount = 0) => {
+      const maxRetries = 3;
+      const retryDelay = 2000; // 2 seconds
+      
       try {
         setIsLoading(true);
         setError(null);

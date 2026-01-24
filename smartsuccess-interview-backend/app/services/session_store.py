@@ -243,14 +243,28 @@ class SessionStore:
             self.delete_session(oldest.session_id)
     
     def _cleanup_old_sessions(self):
-        """Remove sessions older than timeout"""
+        """Remove sessions older than timeout
+        
+        Completed sessions are retained longer (24 hours) for report generation
+        In-progress sessions are cleaned up after timeout (60 minutes default)
+        """
         timeout_minutes = getattr(settings, 'session_timeout_minutes', 60)
-        cutoff = datetime.now().timestamp() - (timeout_minutes * 60)
+        completed_retention_hours = 24  # Keep completed sessions for 24 hours
+        
+        current_time = datetime.now().timestamp()
+        cutoff_in_progress = current_time - (timeout_minutes * 60)
+        cutoff_completed = current_time - (completed_retention_hours * 60 * 60)
         
         to_delete = []
         for session_id, session in self._sessions.items():
-            if session.last_activity.timestamp() < cutoff:
-                to_delete.append(session_id)
+            if session.status == InterviewStatus.COMPLETED:
+                # Completed sessions: keep for 24 hours
+                if session.completed_at and session.completed_at.timestamp() < cutoff_completed:
+                    to_delete.append(session_id)
+            else:
+                # In-progress sessions: use normal timeout
+                if session.last_activity.timestamp() < cutoff_in_progress:
+                    to_delete.append(session_id)
         
         for session_id in to_delete:
             self.delete_session(session_id)

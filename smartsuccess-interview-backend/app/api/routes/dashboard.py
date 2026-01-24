@@ -40,7 +40,10 @@ async def get_interview_history(
     limit: int = 10,
     status: Optional[str] = None
 ):
-    """Get user's interview history from SessionStore and BaseInterviewService"""
+    """Get user's interview history from SessionStore and BaseInterviewService
+    
+    Returns empty list if no data found (instead of error) for better UX
+    """
     session_store = get_session_store(request)
     history = []
     
@@ -119,7 +122,10 @@ async def get_user_stats(
     request: Request,
     user_id: str
 ):
-    """Get user's interview statistics from SessionStore and BaseInterviewService"""
+    """Get user's interview statistics from SessionStore and BaseInterviewService
+    
+    Returns empty stats if no data found (instead of error) for better UX
+    """
     session_store = get_session_store(request)
     all_sessions_list = []
     
@@ -349,13 +355,27 @@ async def generate_interview_report(
                     )
     
     if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+        # Provide more helpful error message
+        raise HTTPException(
+            status_code=404, 
+            detail={
+                "error": "Session not found",
+                "message": "This session may have expired or been cleaned up. Sessions are retained for 60 minutes after completion.",
+                "session_id": session_id,
+                "suggestion": "Please complete a new interview to generate a report."
+            }
+        )
     
     # Check if completed
     if session.status != InterviewStatus.COMPLETED:
         raise HTTPException(
             status_code=400, 
-            detail="Report can only be generated for completed interviews"
+            detail={
+                "error": "Interview not completed",
+                "message": "Report can only be generated for completed interviews",
+                "session_id": session_id,
+                "current_status": session.status.value
+            }
         )
     
     # Compile comprehensive report

@@ -88,9 +88,18 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS configuration
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
-if not allowed_origins or allowed_origins == [""]:
+# CORS configuration - Improved parsing with fallback
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "").strip()
+
+if allowed_origins_env:
+    # Parse environment variable, handle spaces and empty values
+    allowed_origins = [
+        origin.strip() 
+        for origin in allowed_origins_env.split(",") 
+        if origin.strip()
+    ]
+else:
+    # Fallback to hardcoded list if environment variable not set
     allowed_origins = [
         "http://localhost:3000",
         "http://localhost:5173",
@@ -98,6 +107,9 @@ if not allowed_origins or allowed_origins == [""]:
         "https://smartsuccess-ai.vercel.app",
         "https://smartsccuss-career-intelligence-ai.onrender.com",
     ]
+
+# Debug logging (helpful for troubleshooting)
+print(f"🌐 CORS Allowed Origins: {allowed_origins}")
 
 app.add_middleware(
     CORSMiddleware,
