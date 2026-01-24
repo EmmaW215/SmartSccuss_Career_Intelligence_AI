@@ -34,8 +34,8 @@ class BehavioralInterviewService(BaseInterviewService):
     max_questions = settings.behavioral_max_questions
     duration_limit_minutes = settings.behavioral_duration_minutes
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, session_store=None):
+        super().__init__(session_store=session_store)
         
         # Initialize RAG service
         self.rag_service = get_behavioral_rag_service()
@@ -317,9 +317,12 @@ Well done!"""
 _behavioral_service_instance: Optional[BehavioralInterviewService] = None
 
 
-def get_behavioral_interview_service() -> BehavioralInterviewService:
+def get_behavioral_interview_service(session_store=None) -> BehavioralInterviewService:
     """Get the singleton behavioral interview service"""
     global _behavioral_service_instance
     if _behavioral_service_instance is None:
-        _behavioral_service_instance = BehavioralInterviewService()
+        _behavioral_service_instance = BehavioralInterviewService(session_store=session_store)
+    elif session_store and not _behavioral_service_instance.session_store:
+        # Update session_store if provided and not already set
+        _behavioral_service_instance.session_store = session_store
     return _behavioral_service_instance

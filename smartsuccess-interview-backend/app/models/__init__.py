@@ -237,6 +237,7 @@ class MessageResponse(BaseModel):
     message: str
     question_number: Optional[int] = None
     total_questions: Optional[int] = None
+    is_complete: Optional[bool] = None  # Phase 2: Add completion flag
     evaluation: Optional[Dict[str, Any]] = None
     summary: Optional[SessionSummary] = None
 

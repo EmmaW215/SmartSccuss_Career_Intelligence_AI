@@ -3,7 +3,7 @@ Technical Interview API Routes
 AI/ML Engineering skills assessment endpoints
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from typing import Optional
 
 from app.models import (
@@ -23,13 +23,17 @@ router = APIRouter(
 )
 
 
-def get_service() -> TechnicalInterviewService:
+def get_service(http_request: Request = None) -> TechnicalInterviewService:
     """Get technical interview service instance"""
-    return get_technical_interview_service()
+    # Phase 2: Get session_store from app state if available
+    session_store = None
+    if http_request:
+        session_store = getattr(http_request.app.state, 'session_store', None)
+    return get_technical_interview_service(session_store=session_store)
 
 
 @router.post("/start", response_model=StartSessionResponse)
-async def start_technical_interview(request: StartSessionRequest):
+async def start_technical_interview(request: StartSessionRequest, http_request: Request):
     """
     Start a new technical interview session
     
@@ -45,7 +49,7 @@ async def start_technical_interview(request: StartSessionRequest):
     - **job_description**: Optional job description for context
     - **matchwise_analysis**: Optional MatchWise analysis with skill gaps
     """
-    service = get_service()
+    service = get_service(http_request)
     
     try:
         session = await service.create_session(
@@ -81,7 +85,7 @@ async def start_technical_interview(request: StartSessionRequest):
 
 
 @router.post("/message", response_model=MessageResponse)
-async def send_technical_message(request: MessageRequest):
+async def send_technical_message(request: MessageRequest, http_request: Request):
     """
     Send a message in the technical interview
     
@@ -95,7 +99,7 @@ async def send_technical_message(request: MessageRequest):
     - **session_id**: Session identifier from start endpoint
     - **message**: User's response text
     """
-    service = get_service()
+    service = get_service(http_request)
     
     session = service.get_session(request.session_id)
     if not session:
@@ -116,9 +120,9 @@ async def send_technical_message(request: MessageRequest):
 
 
 @router.get("/session/{session_id}")
-async def get_technical_session(session_id: str):
+async def get_technical_session(session_id: str, http_request: Request):
     """Get technical session details including scores by domain"""
-    service = get_service()
+    service = get_service(http_request)
     
     session = service.get_session(session_id)
     if not session:

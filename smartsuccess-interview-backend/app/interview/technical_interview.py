@@ -33,8 +33,8 @@ class TechnicalInterviewService(BaseInterviewService):
     max_questions = settings.technical_max_questions
     duration_limit_minutes = settings.technical_duration_minutes
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, session_store=None):
+        super().__init__(session_store=session_store)
         
         # Initialize RAG service
         self.rag_service = get_technical_rag_service()
@@ -335,9 +335,12 @@ Great technical discussion!"""
 _technical_service_instance: Optional[TechnicalInterviewService] = None
 
 
-def get_technical_interview_service() -> TechnicalInterviewService:
+def get_technical_interview_service(session_store=None) -> TechnicalInterviewService:
     """Get the singleton technical interview service"""
     global _technical_service_instance
     if _technical_service_instance is None:
-        _technical_service_instance = TechnicalInterviewService()
+        _technical_service_instance = TechnicalInterviewService(session_store=session_store)
+    elif session_store and not _technical_service_instance.session_store:
+        # Update session_store if provided and not already set
+        _technical_service_instance.session_store = session_store
     return _technical_service_instance

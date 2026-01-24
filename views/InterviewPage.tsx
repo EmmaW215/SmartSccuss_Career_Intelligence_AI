@@ -237,12 +237,16 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
         // Fetch and display report
         if (sessionId) {
           try {
+            setIsProcessing(true); // Show loading state
             const report = await getInterviewReport(sessionId);
             setInterviewReport(report);
             setShowReport(true);
           } catch (reportError: any) {
             console.error('Failed to fetch report:', reportError);
-            // Don't show error to user, just log it
+            // Show user-friendly error message
+            setError(`Failed to generate report: ${reportError.message || 'Please try again later.'}`);
+          } finally {
+            setIsProcessing(false);
           }
         }
         

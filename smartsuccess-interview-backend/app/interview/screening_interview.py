@@ -33,8 +33,8 @@ class ScreeningInterviewService(BaseInterviewService):
     max_questions = settings.screening_max_questions
     duration_limit_minutes = settings.screening_duration_minutes
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, session_store=None):
+        super().__init__(session_store=session_store)
         
         # Initialize RAG service
         self.rag_service = get_screening_rag_service()
@@ -260,9 +260,12 @@ Great job!"""
 _screening_service_instance: Optional[ScreeningInterviewService] = None
 
 
-def get_screening_interview_service() -> ScreeningInterviewService:
+def get_screening_interview_service(session_store=None) -> ScreeningInterviewService:
     """Get the singleton screening interview service"""
     global _screening_service_instance
     if _screening_service_instance is None:
-        _screening_service_instance = ScreeningInterviewService()
+        _screening_service_instance = ScreeningInterviewService(session_store=session_store)
+    elif session_store and not _screening_service_instance.session_store:
+        # Update session_store if provided and not already set
+        _screening_service_instance.session_store = session_store
     return _screening_service_instance

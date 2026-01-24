@@ -3,7 +3,7 @@ Screening Interview API Routes
 First impression assessment endpoints
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from typing import Optional
 
 from app.models import (
@@ -23,13 +23,17 @@ router = APIRouter(
 )
 
 
-def get_service() -> ScreeningInterviewService:
+def get_service(http_request: Request = None) -> ScreeningInterviewService:
     """Get screening interview service instance"""
-    return get_screening_interview_service()
+    # Phase 2: Get session_store from app state if available
+    session_store = None
+    if http_request:
+        session_store = getattr(http_request.app.state, 'session_store', None)
+    return get_screening_interview_service(session_store=session_store)
 
 
 @router.post("/start", response_model=StartSessionResponse)
-async def start_screening_interview(request: StartSessionRequest):
+async def start_screening_interview(request: StartSessionRequest, http_request: Request):
     """
     Start a new screening interview session
     
@@ -37,7 +41,7 @@ async def start_screening_interview(request: StartSessionRequest):
     - **resume_text**: Optional resume content for personalization
     - **job_description**: Optional job description for context
     """
-    service = get_service()
+    service = get_service(http_request)
     
     try:
         session = await service.create_session(
@@ -73,14 +77,14 @@ async def start_screening_interview(request: StartSessionRequest):
 
 
 @router.post("/message", response_model=MessageResponse)
-async def send_screening_message(request: MessageRequest):
+async def send_screening_message(request: MessageRequest, http_request: Request):
     """
     Send a message in the screening interview
     
     - **session_id**: Session identifier from start endpoint
     - **message**: User's response text
     """
-    service = get_service()
+    service = get_service(http_request)
     
     session = service.get_session(request.session_id)
     if not session:
@@ -101,9 +105,9 @@ async def send_screening_message(request: MessageRequest):
 
 
 @router.get("/session/{session_id}")
-async def get_screening_session(session_id: str):
+async def get_screening_session(session_id: str, http_request: Request):
     """Get screening session details"""
-    service = get_service()
+    service = get_service(http_request)
     
     session = service.get_session(session_id)
     if not session:

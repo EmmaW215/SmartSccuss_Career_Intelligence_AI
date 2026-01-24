@@ -16,6 +16,16 @@ from app.models import (
     SessionSummary
 )
 
+# Phase 2: Import session adapter for syncing to SessionStore
+try:
+    from app.services.session_adapter import sync_base_session_to_store
+    from app.services.session_store import SessionStore
+    SESSION_STORE_AVAILABLE = True
+except ImportError:
+    SESSION_STORE_AVAILABLE = False
+    sync_base_session_to_store = None
+    SessionStore = None
+
 
 class BaseInterviewService(ABC):
     """
@@ -31,9 +41,11 @@ class BaseInterviewService(ABC):
     max_questions: int
     duration_limit_minutes: int
     
-    def __init__(self):
+    def __init__(self, session_store: Optional[Any] = None):
         # Store active sessions
         self.sessions: Dict[str, InterviewSession] = {}
+        # Phase 2: Store reference to SessionStore for syncing
+        self.session_store: Optional[SessionStore] = session_store if SESSION_STORE_AVAILABLE else None
     
     async def create_session(
         self,
@@ -60,6 +72,13 @@ class BaseInterviewService(ABC):
         )
         
         self.sessions[session_id] = session
+        
+        # Phase 2: Sync to SessionStore if available
+        if self.session_store and SESSION_STORE_AVAILABLE:
+            try:
+                sync_base_session_to_store(session, self.session_store)
+            except Exception as e:
+                print(f"Warning: Failed to sync session to SessionStore: {e}")
         
         # Build RAG context if we have resume/JD
         if resume_text or job_description:
@@ -186,6 +205,13 @@ class BaseInterviewService(ABC):
             "timestamp": datetime.utcnow().isoformat()
         })
         
+        # Phase 2: Sync to SessionStore after recording response
+        if self.session_store and SESSION_STORE_AVAILABLE:
+            try:
+                sync_base_session_to_store(session, self.session_store)
+            except Exception as e:
+                print(f"Warning: Failed to sync session to SessionStore: {e}")
+        
         # Check if we need a follow-up
         follow_up = await self._check_follow_up(session, evaluation)
         if follow_up:
@@ -249,6 +275,14 @@ class BaseInterviewService(ABC):
         session.phase = InterviewPhase.COMPLETED
         session.completed_at = datetime.utcnow()
         
+        # Phase 2: Sync to SessionStore and mark as completed
+        if self.session_store and SESSION_STORE_AVAILABLE:
+            try:
+                sync_base_session_to_store(session, self.session_store)
+                self.session_store.complete_session(session.session_id)
+            except Exception as e:
+                print(f"Warning: Failed to sync completed session to SessionStore: {e}")
+        
         # Generate summary
         summary = await self._generate_summary(session)
         
@@ -265,7 +299,8 @@ class BaseInterviewService(ABC):
         return MessageResponse(
             type="completion",
             message=completion_message,
-            summary=summary
+            summary=summary,
+            is_complete=True  # Add is_complete field for frontend
         )
     
     @abstractmethod

@@ -233,7 +233,18 @@ export async function sendInterviewMessage(
       };
     }
     
-    return data as MessageResponse;
+    // For all other types, ensure is_complete is set when type is 'completion'
+    const normalizedResponse: MessageResponse = {
+      type: data.type || 'question',
+      message: data.message || '',
+      question_number: data.question_number,
+      total_questions: data.total_questions,
+      is_complete: data.type === 'completion' || data.is_complete || false,
+      evaluation: data.evaluation,
+      summary: data.summary,
+    };
+    
+    return normalizedResponse;
   } catch (error) {
     console.error('Error sending interview message:', error);
     throw error;
