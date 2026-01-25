@@ -113,3 +113,62 @@ export interface SessionFeedback {
     estimated_percentage: number;
   };
 }
+
+// ============================================
+// Lab-specific types (AI Skills Lab)
+// ============================================
+import { LucideIcon } from 'lucide-react';
+
+export type LabViewState = 'lab-dashboard' | 'lab-workspace' | 'lab-results';
+
+export interface LabChallenge {
+  id: string;
+  title: string;
+  category: string;
+  difficulty: 'Basic' | 'Intermediate' | 'Advanced' | 'Expert';
+  icon: LucideIcon;
+  description: string;
+  reward: string;
+  initialFiles: LabFileNode[];
+  timeLimit: number; // in minutes
+  
+  // Detailed Content
+  scenario: string;
+  requirements: string[];
+  expectations: { aspect: string; expectation: string }[];
+  minimumPass: string[];
+  timeEstimate: string;
+  
+  // Evaluation / Post-Completion
+  keyPoints: string[];
+  expectedOutputs: string;
+  qualificationCriteria: { level: string; criteria: string; score?: string }[];
+}
+
+export interface LabFileNode {
+  id: string;
+  name: string;
+  language: string;
+  content: string;
+}
+
+export interface LabChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: Date;
+}
+
+export interface AssessmentResult {
+  score: number;
+  level: string;
+  breakdown: {
+    planning: number;
+    promptEngineering: number;
+    toolOrchestration: number;
+    outcomeQuality: number;
+  };
+  strengths: string[];
+  improvements: string[];
+  summary: string;
+}

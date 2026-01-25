@@ -70,3 +70,44 @@ export const analyzeResume = async (resumeText: string, jobUrl: string): Promise
         return "Failed to analyze resume.";
     }
 }
+
+// ============================================
+// Lab-specific functions (AI Skills Lab)
+// ============================================
+
+export const generateLabAIResponse = async (
+  messages: { role: string; content: string }[],
+  systemInstruction?: string
+): Promise<string> => {
+  if (!ai || !process.env.API_KEY) {
+    // Fallback simulation if no API key is present for the demo
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve("I am a simulated AI response because no API Key was detected in the environment. In a real deployment, I would process your request using Gemini 3 Flash.");
+      }, 1000);
+    });
+  }
+
+  try {
+    const model = 'gemini-3-flash-preview';
+    
+    // Convert history to prompt format suitable for generateContent
+    // Since chat interfaces usually send history, we'll format it as a single context block
+    // or use the chat API if maintaining state. For simplicity here, we treat it as a fresh generation.
+    
+    const prompt = messages[messages.length - 1].content;
+    
+    const response = await ai.models.generateContent({
+      model: model,
+      contents: prompt,
+      config: {
+        systemInstruction: systemInstruction,
+      }
+    });
+
+    return response.text || "No response generated.";
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    return "Error connecting to AI service. Please try again.";
+  }
+};

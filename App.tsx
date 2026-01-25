@@ -1,18 +1,25 @@
 import React, { useState } from 'react';
-import { ViewState, InterviewType } from './types';
+import { ViewState, InterviewType, LabViewState, LabChallenge } from './types';
 import { Sidebar } from './components/Sidebar';
 import { LandingPage } from './views/LandingPage';
 import { InterviewPage } from './views/InterviewPage';
 import { DashboardPage } from './views/DashboardPage';
 import { DemoPage } from './views/DemoPage';
-import { SkillsLabPage } from './views/SkillsLabPage';
+import { LabSkillsLabPage } from './views/LabSkillsLabPage';
+import { LabWorkspace } from './views/LabWorkspace';
+import { LabResultsView } from './views/LabResultsView';
 import { SampleAnalysisPage } from './views/SampleAnalysisPage';
 import { AuthProvider } from './contexts/AuthContext';
 import { AccessModals } from './components/AccessModals';
+import { LAB_MOCK_RESULTS } from './constants/labChallenges';
 
 function AppContent() {
   const [currentView, setCurrentView] = useState<ViewState>('landing');
   const [selectedInterviewType, setSelectedInterviewType] = useState<InterviewType>(InterviewType.SCREENING);
+  // Lab-specific state management
+  const [labView, setLabView] = useState<LabViewState>('lab-dashboard');
+  const [activeChallenge, setActiveChallenge] = useState<LabChallenge | null>(null);
+  const [completedChallenges, setCompletedChallenges] = useState<string[]>([]);
 
   const handleNavigate = (view: ViewState) => {
     setCurrentView(view);
@@ -67,7 +74,42 @@ function AppContent() {
         )}
 
         {currentView === 'lab' && (
-          <SkillsLabPage onBackToHome={() => setCurrentView('landing')} />
+          <>
+            {labView === 'lab-dashboard' && (
+              <LabSkillsLabPage 
+                onBackToHome={() => setCurrentView('landing')}
+                onSelectChallenge={(challenge) => {
+                  setActiveChallenge(challenge);
+                  setLabView('lab-workspace');
+                }}
+                completedChallenges={completedChallenges}
+              />
+            )}
+            {labView === 'lab-workspace' && activeChallenge && (
+              <LabWorkspace 
+                challenge={activeChallenge}
+                onExit={() => {
+                  setLabView('lab-dashboard');
+                  setActiveChallenge(null);
+                }}
+                onSubmit={() => {
+                  if (activeChallenge) {
+                    setCompletedChallenges(prev => [...new Set([...prev, activeChallenge.id])]);
+                  }
+                  setLabView('lab-results');
+                }}
+              />
+            )}
+            {labView === 'lab-results' && (
+              <LabResultsView 
+                result={LAB_MOCK_RESULTS as any}
+                onHome={() => {
+                  setLabView('lab-dashboard');
+                  setActiveChallenge(null);
+                }}
+              />
+            )}
+          </>
         )}
 
         {currentView === 'sample-analysis' && (

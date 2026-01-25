@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SmartSuccess AI Skills Lab</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
+            colors: {
+              purple: {
+                50: '#faf5ff',
+                100: '#f3e8ff',
+                500: '#a855f7',
+                600: '#9333ea',
+                700: '#7e22ce',
+                900: '#581c87',
+              }
+            }
+          },
+        },
+      }
+    </script>
+    <style>
+      /* Custom scrollbar for a cleaner IDE look */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-gray-50 h-screen overflow-hidden text-gray-900">
+    <div id="root" class="h-full"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
