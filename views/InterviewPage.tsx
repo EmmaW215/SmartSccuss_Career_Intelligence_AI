@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, RefreshCw, Send, Play, Square, AlertCircle, Bot, LogIn, Lock, CheckCircle, User, Crown, Star, TrendingUp, Upload, X, FileText, XCircle } from 'lucide-react';
+import { Mic, MicOff, RefreshCw, Send, Play, Square, AlertCircle, Bot, LogIn, Lock, CheckCircle, User, Crown, Star, TrendingUp, Upload, X, FileText, XCircle, PhoneCall, MessageSquare } from 'lucide-react';
 import { InterviewType, Message } from '../types';
 import SimpleVisitorCounter from '../components/SimpleVisitorCounter';
 import { FileUploader } from '../components/interview/FileUploader';
+import { InterviewVoicePanel } from '../components/interview/InterviewVoicePanel';
+import { GPUStatusIndicator } from '../components/GPUStatusIndicator';
 import { useMicrophone } from '../hooks/useMicrophone';
 import { 
   startInterviewSession, 
@@ -10,7 +12,7 @@ import {
   deleteInterviewSession,
   checkBackendHealth,
   uploadCustomizeInterviewFiles,
-  transcribeAudio,
+  transcribeAudioWithFallback,
   getInterviewReport,
   type MessageResponse,
   type InterviewReport
@@ -41,19 +43,24 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
   const [showReport, setShowReport] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
+  // Voice mode state
+  const [voiceMode, setVoiceMode] = useState(false);
+  
   // File upload state (for Customize Interview)
   const [uploadedFiles, setUploadedFiles] = useState<Array<{ id: string; name: string; size: number; type: string; file: File }>>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [showFileUploader, setShowFileUploader] = useState(false);
   const [filesUploaded, setFilesUploaded] = useState(false);
   
-  // Microphone hook for voice recording
+  // Microphone hook for voice recording (with Web Speech API fallback)
   const {
     isMicAvailable,
     permissionGranted,
     deviceName,
     error: micError,
     isRecording,
+    webSpeechTranscript,
+    webSpeechAvailable,
     checkMicrophone,
     startRecording: startMicRecording,
     stopRecording: stopMicRecording,
@@ -298,9 +305,13 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
             throw new Error('No audio recorded. Please try again.');
           }
           
-          // Transcribe audio to text
-          const transcribeResult = await transcribeAudio(audioBlob, 'en');
+          // Transcribe audio with 3-level fallback: GPU Whisper → OpenAI → Web Speech API
+          const transcribeResult = await transcribeAudioWithFallback(audioBlob, 'en', webSpeechTranscript);
           const transcribedText = transcribeResult.text.trim();
+          
+          if (transcribeResult.provider === 'web-speech-api') {
+            console.log('Used Web Speech API fallback for transcription');
+          }
           
           if (transcribedText && transcribedText.length > 0) {
             // Set transcribed text to input field
@@ -467,6 +478,36 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
     onNavigateToDashboard();
   };
 
+  // Map InterviewType enum to VoicePanel's string format
+  const getVoicePanelType = (): 'screening' | 'behavioral' | 'technical' | 'customize' => {
+    const map: Record<string, 'screening' | 'behavioral' | 'technical' | 'customize'> = {
+      [InterviewType.SCREENING]: 'screening',
+      [InterviewType.BEHAVIORAL]: 'behavioral',
+      [InterviewType.TECHNICAL]: 'technical',
+      [InterviewType.CUSTOMIZE]: 'customize',
+    };
+    return map[interviewType] || 'screening';
+  };
+
+  // Handle voice panel interview completion
+  const handleVoicePanelComplete = (transcript: any[]) => {
+    setIsInterviewComplete(true);
+    setVoiceMode(false); // Switch back to text mode to show report
+    
+    // Fetch report
+    if (sessionId) {
+      getInterviewReport(sessionId)
+        .then(report => {
+          setInterviewReport(report);
+          setShowReport(true);
+        })
+        .catch(err => {
+          console.error('Failed to fetch report:', err);
+          setError('Failed to generate report. Check your dashboard for results.');
+        });
+    }
+  };
+
   // Helper for button appearance
   const getStatusButtonConfig = () => {
     if (isLoading) {
@@ -588,7 +629,28 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
           </div>
         </div>
         <div className="flex items-center gap-4">
+          <GPUStatusIndicator compact={true} />
           <SimpleVisitorCounter />
+          
+          {/* Voice/Text Mode Toggle */}
+          {sessionId && !isInterviewComplete && (
+            <button
+              onClick={() => setVoiceMode(!voiceMode)}
+              className={`flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border transition-all ${
+                voiceMode
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
+              title={voiceMode ? 'Switch to Text Mode' : 'Switch to Voice Mode'}
+            >
+              {voiceMode ? (
+                <><MessageSquare size={16} /> Text Mode</>
+              ) : (
+                <><PhoneCall size={16} /> Voice Mode</>
+              )}
+            </button>
+          )}
+          
           <button 
             onClick={handleNavigateToAnalytics}
             className="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors"
@@ -847,7 +909,21 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
         </div>
       )}
 
-      {/* Main Chat Area */}
+      {/* Voice Mode: Show InterviewVoicePanel */}
+      {voiceMode && sessionId ? (
+        <div className="flex-1 overflow-hidden p-4">
+          <InterviewVoicePanel
+            interviewType={getVoicePanelType()}
+            sessionId={sessionId}
+            userName={user?.name}
+            voiceEnabled={true}
+            onInterviewComplete={handleVoicePanelComplete}
+            customDocuments={uploadedFiles.map(f => f.file)}
+          />
+        </div>
+      ) : (
+      <>
+      {/* Main Chat Area (Text Mode) */}
       <div className="flex-1 overflow-y-auto p-8 space-y-6">
         {messages.map((msg) => (
           <div key={msg.id} className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -967,6 +1043,8 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
             )}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 };

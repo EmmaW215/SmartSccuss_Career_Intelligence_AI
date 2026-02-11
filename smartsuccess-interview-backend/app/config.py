@@ -91,18 +91,24 @@ class Settings(BaseSettings):
 
 
 # Phase 2: Cost-Optimized Model Configuration (optional)
+# Fallback chain: Gemini (free) → Groq/Llama (free) → OpenAI (paid, last resort)
 COST_OPTIMIZED_CONFIG = {
     "llm": {
         "primary": {
             "provider": "gemini",
             "model": "gemini-2.0-flash-exp",
-            "cost_per_1m_tokens": 0,  # Free tier
+            "cost_per_1m_tokens": 0,  # Free tier: 1500 req/day
             "daily_limit": 1500
         },
         "fallback": {
             "provider": "gemini",
             "model": "gemini-1.5-flash",
             "cost_per_1m_tokens": 0.075  # ~$0.075/1M
+        },
+        "groq_fallback": {
+            "provider": "groq",
+            "model": "llama-3.3-70b-versatile",
+            "cost_per_1m_tokens": 0,  # Free tier: 14400 req/day, 30 req/min
         },
         "emergency": {
             "provider": "openai",

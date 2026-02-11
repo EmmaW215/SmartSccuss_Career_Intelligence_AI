@@ -1,26 +1,24 @@
 /**
- * useInterviewSession Hook (Phase 2 - Optional Enhancement)
+ * useInterviewSession Hook
  * Manages interview session state and API communication
  * 
- * Note: This is an optional enhancement. Existing InterviewPage uses interviewService directly.
- * This hook provides additional Phase 2 features like voice mode, feedback hints, etc.
+ * Adapted from Phase 2 to use main project's interviewService
  */
 
 import { useState, useCallback } from 'react';
-import { 
-  startInterviewSession, 
-  sendInterviewMessage,
-  deleteInterviewSession,
-  type MessageResponse 
-} from '../services/interviewService';
 import { InterviewType } from '../types';
+import {
+  startInterviewSession,
+  sendInterviewMessage,
+  transcribeAudioWithFallback,
+  synthesizeSpeech,
+  uploadCustomizeInterviewFiles,
+} from '../services/interviewService';
 
 interface StartInterviewOptions {
   userName?: string;
   voiceEnabled?: boolean;
   customDocuments?: File[];
-  resumeText?: string;
-  jobDescription?: string;
 }
 
 interface StartInterviewResult {
@@ -62,13 +60,30 @@ interface UseInterviewSessionReturn {
   error: string | null;
 }
 
+/**
+ * Map voice panel interview type strings to main project's InterviewType enum
+ */
+function toInterviewType(
+  type: 'screening' | 'behavioral' | 'technical' | 'customize'
+): InterviewType {
+  const map: Record<string, InterviewType> = {
+    screening: InterviewType.SCREENING,
+    behavioral: InterviewType.BEHAVIORAL,
+    technical: InterviewType.TECHNICAL,
+    customize: InterviewType.CUSTOMIZE,
+  };
+  return map[type] || InterviewType.SCREENING;
+}
+
 export const useInterviewSession = (
-  sessionId: string | null,
-  interviewType: InterviewType
+  sessionId: string,
+  interviewType: 'screening' | 'behavioral' | 'technical' | 'customize'
 ): UseInterviewSessionReturn => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(sessionId);
+  const [currentSessionId, setCurrentSessionId] = useState<string>(sessionId);
+
+  const type = toInterviewType(interviewType);
 
   /**
    * Start a new interview session
@@ -80,38 +95,24 @@ export const useInterviewSession = (
     setError(null);
 
     try {
-      // Use existing interviewService
-      const userId = `user_${Date.now()}`;
-      const result = await startInterviewSession(
-        interviewType,
-        userId,
-        options.resumeText,
-        options.jobDescription
-      );
+      // Upload files first for customize interview
+      if (interviewType === 'customize' && options.customDocuments?.length) {
+        await uploadCustomizeInterviewFiles(sessionId, options.customDocuments);
+      }
+
+      // Start interview session
+      const result = await startInterviewSession(type, sessionId);
 
       setCurrentSessionId(result.session_id);
 
-      // If voice enabled, try to get audio for greeting (Phase 2 feature)
+      // Synthesize greeting audio if voice enabled
       let audioUrl: string | undefined;
       if (options.voiceEnabled) {
         try {
-          // Try to synthesize greeting (Phase 2 - optional)
-          const BACKEND_URL = typeof window !== 'undefined' && window.location.hostname === 'localhost'
-            ? 'http://localhost:8000'
-            : (process.env.NEXT_PUBLIC_BACKEND_URL || 'https://smartsccuss-career-intelligence-ai.onrender.com');
-          
-          const ttsResponse = await fetch(`${BACKEND_URL}/api/voice/synthesize-url`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: result.greeting, voice: 'professional' })
-          });
-          
-          if (ttsResponse.ok) {
-            const ttsData = await ttsResponse.json();
-            audioUrl = ttsData.audio_url;
-          }
+          const url = await synthesizeSpeech(result.greeting);
+          audioUrl = url || undefined;
         } catch (ttsError) {
-          console.warn('TTS failed, continuing without audio:', ttsError);
+          console.warn('TTS failed for greeting, continuing without audio:', ttsError);
         }
       }
 
@@ -119,7 +120,7 @@ export const useInterviewSession = (
         sessionId: result.session_id,
         greeting: result.greeting,
         audioUrl,
-        totalQuestions: result.max_questions
+        totalQuestions: result.max_questions || 10,
       };
 
     } catch (err) {
@@ -129,7 +130,7 @@ export const useInterviewSession = (
     } finally {
       setIsLoading(false);
     }
-  }, [interviewType]);
+  }, [sessionId, interviewType, type]);
 
   /**
    * Send user response (voice or text)
@@ -140,80 +141,41 @@ export const useInterviewSession = (
     setIsLoading(true);
     setError(null);
 
-    if (!currentSessionId) {
-      throw new Error('No active session. Please start an interview first.');
-    }
-
     try {
       let userTranscript: string;
 
-      // If audio, transcribe first (Phase 2 feature)
+      // If audio, transcribe with fallback (GPU → OpenAI → Web Speech API)
       if (options.audio) {
-        const BACKEND_URL = typeof window !== 'undefined' && window.location.hostname === 'localhost'
-          ? 'http://localhost:8000'
-          : (process.env.NEXT_PUBLIC_BACKEND_URL || 'https://smartsccuss-career-intelligence-ai.onrender.com');
-        
-        const formData = new FormData();
-        formData.append('audio', options.audio, 'recording.webm');
-        formData.append('language', 'en');
-        
-        const transcribeResponse = await fetch(`${BACKEND_URL}/api/voice/transcribe`, {
-          method: 'POST',
-          body: formData
-        });
-        
-        if (!transcribeResponse.ok) {
-          throw new Error('Failed to transcribe audio');
-        }
-        
-        const transcribeData = await transcribeResponse.json();
-        userTranscript = transcribeData.text;
+        const transcription = await transcribeAudioWithFallback(options.audio);
+        userTranscript = transcription.text;
       } else if (options.text) {
         userTranscript = options.text;
       } else {
         throw new Error('Either audio or text must be provided');
       }
 
-      // Send response using existing interviewService
-      const result: MessageResponse = await sendInterviewMessage(
-        interviewType,
-        currentSessionId,
-        userTranscript
-      );
+      // Send response to get AI reply
+      const result = await sendInterviewMessage(type, currentSessionId, userTranscript);
 
-      // Get audio for AI response (Phase 2 feature)
+      // Synthesize AI response audio
       let audioUrl: string | undefined;
-      try {
-        const BACKEND_URL = typeof window !== 'undefined' && window.location.hostname === 'localhost'
-          ? 'http://localhost:8000'
-          : (process.env.NEXT_PUBLIC_BACKEND_URL || 'https://smartsccuss-career-intelligence-ai.onrender.com');
-        
-        const ttsResponse = await fetch(`${BACKEND_URL}/api/voice/synthesize-url`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: result.message, voice: 'professional' })
-        });
-        
-        if (ttsResponse.ok) {
-          const ttsData = await ttsResponse.json();
-          audioUrl = ttsData.audio_url;
+      if (result.message) {
+        try {
+          const url = await synthesizeSpeech(result.message);
+          audioUrl = url || undefined;
+        } catch (ttsError) {
+          console.warn('TTS failed for response:', ttsError);
         }
-      } catch (ttsError) {
-        console.warn('TTS failed:', ttsError);
       }
 
       return {
         userTranscript,
         aiResponse: result.message,
         audioUrl,
-        feedbackHint: result.evaluation ? {
-          hint: result.evaluation.feedback || '',
-          quality: result.evaluation.score && result.evaluation.score >= 4 ? 'good' :
-                   result.evaluation.score && result.evaluation.score >= 3 ? 'fair' : 'needs_improvement'
-        } : undefined,
+        feedbackHint: undefined, // Standard interviews don't have feedbackHint in same format
         currentQuestion: result.question_number || 0,
         totalQuestions: result.total_questions || 0,
-        isComplete: result.type === 'completion'
+        isComplete: result.is_complete || false,
       };
 
     } catch (err) {
@@ -223,7 +185,7 @@ export const useInterviewSession = (
     } finally {
       setIsLoading(false);
     }
-  }, [currentSessionId, interviewType]);
+  }, [currentSessionId, type]);
 
   /**
    * End interview early
@@ -232,18 +194,14 @@ export const useInterviewSession = (
     setIsLoading(true);
     setError(null);
 
-    if (!currentSessionId) {
-      throw new Error('No active session');
-    }
-
     try {
-      // Delete session using existing service
-      await deleteInterviewSession(interviewType, currentSessionId);
-      
+      // Send "stop" message to end the interview
+      const result = await sendInterviewMessage(type, currentSessionId, 'stop');
+
       return {
-        closingMessage: 'Interview ended. Thank you for your time!',
-        questionsAnswered: 0,
-        totalQuestions: 0
+        closingMessage: result.message || 'Interview ended.',
+        questionsAnswered: result.question_number || 0,
+        totalQuestions: result.total_questions || 0,
       };
 
     } catch (err) {
@@ -253,14 +211,14 @@ export const useInterviewSession = (
     } finally {
       setIsLoading(false);
     }
-  }, [currentSessionId, interviewType]);
+  }, [currentSessionId, type]);
 
   return {
     startInterview,
     sendResponse,
     endInterview,
     isLoading,
-    error
+    error,
   };
 };
 

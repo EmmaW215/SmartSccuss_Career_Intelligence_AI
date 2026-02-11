@@ -1,6 +1,9 @@
 /**
- * useMicrophone Hook (Phase 2)
- * Handles microphone detection, permission, and recording
+ * useMicrophone Hook (Phase 2 + Web Speech API fallback)
+ * Handles microphone detection, permission, recording, and browser STT fallback
+ * 
+ * During recording, Web Speech API runs in parallel as a fallback transcription
+ * source in case GPU Whisper and OpenAI Whisper are both unavailable.
  */
 
 import { useState, useCallback, useRef } from 'react';
@@ -19,10 +22,26 @@ interface UseMicrophoneReturn {
   error?: string;
   isRecording: boolean;
   audioBlob: Blob | null;
+  webSpeechTranscript: string | null;
+  webSpeechAvailable: boolean;
   checkMicrophone: () => Promise<MicrophoneStatus>;
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<Blob>;
   cancelRecording: () => void;
+}
+
+// Check if Web Speech API is available
+function checkWebSpeechSupport(): boolean {
+  return !!(
+    typeof window !== 'undefined' &&
+    (window.SpeechRecognition || (window as any).webkitSpeechRecognition)
+  );
+}
+
+// Get SpeechRecognition constructor
+function getSpeechRecognition(): (new () => SpeechRecognition) | null {
+  if (typeof window === 'undefined') return null;
+  return window.SpeechRecognition || (window as any).webkitSpeechRecognition || null;
 }
 
 export const useMicrophone = (): UseMicrophoneReturn => {
@@ -32,10 +51,15 @@ export const useMicrophone = (): UseMicrophoneReturn => {
   });
   const [isRecording, setIsRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [webSpeechTranscript, setWebSpeechTranscript] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
+  const webSpeechTextRef = useRef<string>('');
+
+  const webSpeechAvailable = checkWebSpeechSupport();
 
   /**
    * Check if microphone is available and request permission
@@ -92,7 +116,7 @@ export const useMicrophone = (): UseMicrophoneReturn => {
             errorMessage = 'Microphone is in use by another application.';
             break;
           default:
-            errorMessage = `Microphone error: ${error.message}`;
+            errorMessage = `Microphone error: ${(error as DOMException).message}`;
         }
       }
 
@@ -107,7 +131,85 @@ export const useMicrophone = (): UseMicrophoneReturn => {
   }, []);
 
   /**
-   * Start recording audio
+   * Start Web Speech API recognition in background (fallback STT)
+   */
+  const startWebSpeechRecognition = useCallback(() => {
+    const SpeechRecognitionClass = getSpeechRecognition();
+    if (!SpeechRecognitionClass) return;
+
+    try {
+      const recognition = new SpeechRecognitionClass();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      webSpeechTextRef.current = '';
+
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
+        let finalText = '';
+        let interimText = '';
+
+        for (let i = 0; i < event.results.length; i++) {
+          const result = event.results[i];
+          if (result.isFinal) {
+            finalText += result[0].transcript;
+          } else {
+            interimText += result[0].transcript;
+          }
+        }
+
+        webSpeechTextRef.current = (finalText + interimText).trim();
+      };
+
+      recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+        // Don't log 'no-speech' or 'aborted' as they're expected
+        if (event.error !== 'no-speech' && event.error !== 'aborted') {
+          console.warn('Web Speech API fallback error:', event.error);
+        }
+      };
+
+      recognition.onend = () => {
+        // Auto-restart if still recording (Web Speech API stops after silence)
+        if (mediaRecorderRef.current && isRecording) {
+          try {
+            recognition.start();
+          } catch {
+            // Ignore restart errors
+          }
+        }
+      };
+
+      recognition.start();
+      speechRecognitionRef.current = recognition;
+      console.log('Web Speech API fallback started');
+
+    } catch (error) {
+      console.warn('Failed to start Web Speech API fallback:', error);
+    }
+  }, [isRecording]);
+
+  /**
+   * Stop Web Speech API recognition
+   */
+  const stopWebSpeechRecognition = useCallback(() => {
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.stop();
+      } catch {
+        // Ignore stop errors
+      }
+      speechRecognitionRef.current = null;
+    }
+    // Save the final transcript
+    const transcript = webSpeechTextRef.current.trim();
+    if (transcript) {
+      setWebSpeechTranscript(transcript);
+    }
+    return transcript;
+  }, []);
+
+  /**
+   * Start recording audio (with parallel Web Speech API fallback)
    */
   const startRecording = useCallback(async (): Promise<void> => {
     if (!status.available) {
@@ -116,6 +218,10 @@ export const useMicrophone = (): UseMicrophoneReturn => {
         throw new Error(check.error || 'Microphone not available');
       }
     }
+
+    // Reset fallback transcript
+    setWebSpeechTranscript(null);
+    webSpeechTextRef.current = '';
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -156,15 +262,21 @@ export const useMicrophone = (): UseMicrophoneReturn => {
       mediaRecorder.start(100); // Collect data every 100ms
       setIsRecording(true);
 
+      // Start Web Speech API in parallel as fallback STT
+      startWebSpeechRecognition();
+
     } catch (error) {
       throw new Error('Failed to start recording');
     }
-  }, [status.available, checkMicrophone]);
+  }, [status.available, checkMicrophone, startWebSpeechRecognition]);
 
   /**
    * Stop recording and return audio blob
    */
   const stopRecording = useCallback(async (): Promise<Blob> => {
+    // Stop Web Speech API first to capture final transcript
+    stopWebSpeechRecognition();
+
     return new Promise((resolve, reject) => {
       if (!mediaRecorderRef.current || !isRecording) {
         reject(new Error('No recording in progress'));
@@ -196,12 +308,15 @@ export const useMicrophone = (): UseMicrophoneReturn => {
 
       mediaRecorder.stop();
     });
-  }, [isRecording]);
+  }, [isRecording, stopWebSpeechRecognition]);
 
   /**
    * Cancel recording without returning data
    */
   const cancelRecording = useCallback(() => {
+    // Stop Web Speech API
+    stopWebSpeechRecognition();
+
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
     }
@@ -214,7 +329,8 @@ export const useMicrophone = (): UseMicrophoneReturn => {
     mediaRecorderRef.current = null;
     chunksRef.current = [];
     setIsRecording(false);
-  }, [isRecording]);
+    setWebSpeechTranscript(null);
+  }, [isRecording, stopWebSpeechRecognition]);
 
   return {
     isMicAvailable: status.available,
@@ -223,6 +339,8 @@ export const useMicrophone = (): UseMicrophoneReturn => {
     error: status.error,
     isRecording,
     audioBlob,
+    webSpeechTranscript,
+    webSpeechAvailable,
     checkMicrophone,
     startRecording,
     stopRecording,

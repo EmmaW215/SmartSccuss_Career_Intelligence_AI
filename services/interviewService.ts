@@ -601,3 +601,97 @@ export async function getInterviewReport(sessionId: string): Promise<InterviewRe
     throw error;
   }
 }
+
+/**
+ * Synthesize text to speech using backend API
+ * Returns a data URL (base64) that can be played with Audio element
+ */
+export async function synthesizeSpeech(
+  text: string,
+  voice: string = 'professional'
+): Promise<string | null> {
+  const url = `${BACKEND_URL}/api/voice/synthesize`;
+
+  try {
+    const formData = new FormData();
+    formData.append('text', text);
+    formData.append('voice', voice);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      console.warn('TTS synthesis failed:', response.status);
+      return null;
+    }
+
+    // Convert audio response to data URL for playback
+    const audioBlob = await response.blob();
+    const dataUrl = URL.createObjectURL(audioBlob);
+    return dataUrl;
+  } catch (error) {
+    console.warn('TTS synthesis error:', error);
+    return null;
+  }
+}
+
+/**
+ * Transcribe audio with three-level fallback:
+ * 1. Backend API (GPU Whisper → OpenAI Whisper)
+ * 2. Web Speech API transcript (captured during recording)
+ * 
+ * @param audioBlob - Recorded audio blob
+ * @param language - Language code
+ * @param webSpeechFallback - Pre-captured Web Speech API transcript (from useMicrophone)
+ */
+export async function transcribeAudioWithFallback(
+  audioBlob: Blob,
+  language: string = 'en',
+  webSpeechFallback?: string | null
+): Promise<TranscribeResponse> {
+  // Level 1 & 2: Try backend (GPU Whisper → OpenAI Whisper)
+  try {
+    const result = await transcribeAudio(audioBlob, language);
+    if (result.text && result.text.trim().length > 0) {
+      return result;
+    }
+  } catch (error) {
+    console.warn('Backend transcription failed, checking Web Speech fallback:', error);
+  }
+
+  // Level 3: Use Web Speech API fallback transcript
+  if (webSpeechFallback && webSpeechFallback.trim().length > 0) {
+    console.log('Using Web Speech API fallback transcript');
+    return {
+      text: webSpeechFallback.trim(),
+      language: language,
+      provider: 'web-speech-api',
+    };
+  }
+
+  // All levels failed
+  throw new Error(
+    'Speech transcription unavailable. Both backend and browser speech recognition failed. Please type your response instead.'
+  );
+}
+
+/**
+ * Check voice service status
+ */
+export async function getVoiceStatus(): Promise<{
+  available: boolean;
+  provider: string;
+  gpu?: { available: boolean; services: Record<string, boolean> };
+}> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/voice/status`);
+    if (!response.ok) {
+      return { available: false, provider: 'none' };
+    }
+    return response.json();
+  } catch {
+    return { available: false, provider: 'none' };
+  }
+}

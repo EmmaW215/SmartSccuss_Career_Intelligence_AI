@@ -1,9 +1,9 @@
 """
-Multi-Provider LLM Service (Phase 2)
-Supports both OpenAI (default) and Gemini (cost-optimized mode)
+Multi-Provider LLM Service (Phase 2 + Groq)
+Supports OpenAI (default), Gemini (cost-optimized), and Groq/Llama (free fallback)
 
 Default behavior: Uses OpenAI (existing behavior)
-Cost-optimized mode: Uses Gemini when cost_optimized_mode=True
+Cost-optimized mode: Gemini (free) → Groq/Llama (free) → OpenAI (paid, last resort)
 """
 
 import os
@@ -19,12 +19,13 @@ class LLMService:
     Multi-provider LLM service with automatic fallback
     
     Default: OpenAI (maintains existing behavior)
-    Cost-optimized: Gemini 2.0 Flash (FREE tier) → Gemini 1.5 Flash → GPT-4o-mini
+    Cost-optimized: Gemini (free) → Groq/Llama (free) → OpenAI (paid, last resort)
     """
     
     def __init__(self):
         self.gemini_api_key = settings.gemini_api_key
         self.openai_api_key = settings.openai_api_key
+        self.groq_api_key = settings.groq_api_key
         self.cost_optimized = settings.cost_optimized_mode
         
         # Track daily usage for Gemini free tier
@@ -66,19 +67,30 @@ class LLMService:
         last_error = None
         for provider_config in providers:
             try:
-                if provider_config["provider"] == "gemini":
+                provider = provider_config["provider"]
+                model = provider_config["model"]
+                
+                if provider == "gemini":
                     return await self._generate_gemini(
                         prompt=prompt,
                         system_prompt=system_prompt,
-                        model=provider_config["model"],
+                        model=model,
                         temperature=temperature,
                         max_tokens=max_tokens
                     )
-                elif provider_config["provider"] == "openai":
+                elif provider == "groq":
+                    return await self._generate_groq(
+                        prompt=prompt,
+                        system_prompt=system_prompt,
+                        model=model,
+                        temperature=temperature,
+                        max_tokens=max_tokens
+                    )
+                elif provider == "openai":
                     return await self._generate_openai(
                         prompt=prompt,
                         system_prompt=system_prompt,
-                        model=provider_config["model"],
+                        model=model,
                         temperature=temperature,
                         max_tokens=max_tokens
                     )
@@ -195,8 +207,55 @@ class LLMService:
             data = response.json()
             return data["choices"][0]["message"]["content"]
     
+    async def _generate_groq(
+        self,
+        prompt: str,
+        system_prompt: Optional[str],
+        model: str,
+        temperature: float,
+        max_tokens: int
+    ) -> str:
+        """Generate using Groq API (Llama models, free tier)"""
+        if not self.groq_api_key:
+            raise Exception("Groq API key not configured")
+        
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.groq_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code != 200:
+                raise Exception(f"Groq API error: {response.text[:200]}")
+            
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+    
     def _get_provider_order(self, force_provider: Optional[str]) -> List[Dict]:
-        """Get ordered list of providers based on cost and availability"""
+        """
+        Get ordered list of providers based on cost and availability
+        
+        Cost-optimized chain:
+        1. Gemini 2.0 Flash (free, 1500 req/day)
+        2. Gemini 1.5 Flash (very cheap)
+        3. Groq / Llama 3.3 70B (free, 14400 req/day)
+        4. OpenAI GPT-4o-mini (paid, last resort)
+        """
         from app.config import COST_OPTIMIZED_CONFIG
         
         config = COST_OPTIMIZED_CONFIG["llm"]
@@ -212,15 +271,25 @@ class LLMService:
                 providers.append(config["fallback"])
             return providers
         
-        # Cost-optimized order
+        if force_provider == "groq":
+            return [config["groq_fallback"]] if self.groq_api_key else []
+        
+        # Cost-optimized order: Gemini → Groq → OpenAI
         providers = []
         
+        # Level 1: Gemini free tier
         if self.gemini_api_key and self._daily_requests < self._free_tier_limit:
             providers.append(config["primary"])
         
+        # Level 2: Gemini fallback model
         if self.gemini_api_key:
             providers.append(config["fallback"])
         
+        # Level 3: Groq / Llama (free)
+        if self.groq_api_key:
+            providers.append(config["groq_fallback"])
+        
+        # Level 4: OpenAI (paid, last resort)
         if self.openai_api_key:
             providers.append(config["emergency"])
         
@@ -236,13 +305,27 @@ class LLMService:
     def get_usage_stats(self) -> Dict:
         """Get current usage statistics"""
         self._check_daily_reset()
+        
+        # Determine current primary provider
+        if self.cost_optimized:
+            if self.gemini_api_key:
+                primary = "gemini"
+            elif self.groq_api_key:
+                primary = "groq"
+            else:
+                primary = "openai"
+        else:
+            primary = "openai"
+        
         return {
             "daily_requests": self._daily_requests,
             "free_tier_limit": self._free_tier_limit,
             "free_tier_remaining": max(0, self._free_tier_limit - self._daily_requests),
-            "primary_provider": "gemini" if (self.cost_optimized and self.gemini_api_key) else "openai",
+            "primary_provider": primary,
             "cost_optimized_mode": self.cost_optimized,
+            "fallback_chain": "gemini → groq → openai" if self.cost_optimized else "openai only",
             "gemini_configured": bool(self.gemini_api_key),
+            "groq_configured": bool(self.groq_api_key),
             "openai_configured": bool(self.openai_api_key)
         }
 
