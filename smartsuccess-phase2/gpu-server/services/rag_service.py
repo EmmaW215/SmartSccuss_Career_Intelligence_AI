@@ -1,17 +1,30 @@
 """
 GPU RAG Service
-Custom RAG building with GPU-accelerated embeddings
+Custom RAG building with GPU-accelerated embeddings + ChromaDB persistence
 
 Cost: $0 (self-hosted)
-Features: Document processing, embedding generation, question customization
+Features: Document processing, embedding generation, question customization, persistent storage
 """
 
 import os
 import json
+import logging
+import time
 import asyncio
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 
 import torch
+
+logger = logging.getLogger("gpu.rag")
+
+
+# Persistent storage path
+CHROMA_PERSIST_DIR = os.environ.get(
+    "CHROMA_PERSIST_DIR",
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "chroma")
+)
+PROFILES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "profiles")
 
 
 class RAGService:
@@ -21,8 +34,10 @@ class RAGService:
     Pipeline:
     1. Document processing (PDF, TXT, MD, DOCX)
     2. Profile extraction
-    3. Embedding generation (GPU-accelerated)
+    3. Embedding generation (GPU-accelerated) + ChromaDB persistence
     4. Question selection and customization
+    
+    Data persists across GPU Server restarts via ChromaDB and JSON profiles.
     """
     
     # Standard questions for customization
@@ -48,28 +63,48 @@ class RAGService:
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.embedding_model = None
-        self.llm = None
+        self.chroma_client = None
         
         self._load_models()
+        self._init_chromadb()
     
     def _load_models(self):
         """Load embedding model"""
         try:
             from sentence_transformers import SentenceTransformer
             
-            print(f"Loading embedding model on {self.device}...")
+            logger.info("Loading embedding model (all-MiniLM-L6-v2) on %s...", self.device)
+            t0 = time.perf_counter()
             self.embedding_model = SentenceTransformer(
                 'all-MiniLM-L6-v2',
                 device=self.device
             )
-            print("Embedding model loaded")
+            logger.info("Embedding model loaded in %.1fs", time.perf_counter() - t0)
             
         except ImportError:
-            print("WARNING: sentence-transformers not installed")
+            logger.error("sentence-transformers not installed — embeddings unavailable")
             self.embedding_model = None
         except Exception as e:
-            print(f"Error loading embedding model: {e}")
+            logger.error("Failed to load embedding model: %s", e)
             self.embedding_model = None
+    
+    def _init_chromadb(self):
+        """Initialize ChromaDB with persistent storage"""
+        try:
+            import chromadb
+            
+            os.makedirs(CHROMA_PERSIST_DIR, exist_ok=True)
+            os.makedirs(PROFILES_DIR, exist_ok=True)
+            
+            self.chroma_client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR)
+            logger.info("ChromaDB initialized (persist: %s)", CHROMA_PERSIST_DIR)
+            
+        except ImportError:
+            logger.warning("DEGRADATION: chromadb not installed — using in-memory only")
+            self.chroma_client = None
+        except Exception as e:
+            logger.error("Failed to initialize ChromaDB: %s", e)
+            self.chroma_client = None
     
     async def build(
         self,
@@ -86,24 +121,196 @@ class RAGService:
         Returns:
             Dict with profile and customized questions
         """
+        t_total = time.perf_counter()
+        
         # Process documents
+        t0 = time.perf_counter()
         documents = await self._process_documents(files)
+        logger.debug("Document processing — %.0fms | %d files → %d docs",
+                      (time.perf_counter() - t0) * 1000, len(files), len(documents))
         
         # Extract profile
+        t0 = time.perf_counter()
         profile = await self._extract_profile(documents)
+        logger.debug("Profile extraction — %.0fms | skills=%d level=%s",
+                      (time.perf_counter() - t0) * 1000,
+                      len(profile.get("technical_skills", [])),
+                      profile.get("career_level"))
         
-        # Generate embeddings (if model available)
+        # Generate embeddings and store in ChromaDB
+        rag_id = None
         if self.embedding_model:
+            t0 = time.perf_counter()
             embeddings = await self._generate_embeddings(documents)
+            logger.debug("Embedding generation — %.0fms | %d vectors",
+                          (time.perf_counter() - t0) * 1000, len(embeddings))
+            
+            t0 = time.perf_counter()
+            rag_id = await self._store_in_chromadb(user_id, documents, embeddings)
+            logger.debug("ChromaDB storage — %.0fms | collection=%s",
+                          (time.perf_counter() - t0) * 1000, rag_id)
         
         # Select and customize questions
+        t0 = time.perf_counter()
         questions = await self._customize_questions(profile, documents)
+        logger.debug("Question customization — %.0fms | %d questions",
+                      (time.perf_counter() - t0) * 1000, len(questions))
+        
+        # Save profile to disk for persistence
+        self._save_profile(user_id, profile, questions)
+        
+        total_ms = (time.perf_counter() - t_total) * 1000
+        logger.info(
+            "RAG build pipeline — %.0fms total | user=%s docs=%d questions=%d",
+            total_ms, user_id, len(documents), len(questions),
+        )
         
         return {
             "profile": profile,
             "questions": questions,
-            "document_count": len(documents)
+            "document_count": len(documents),
+            "rag_id": rag_id
         }
+    
+    async def _store_in_chromadb(
+        self,
+        user_id: str,
+        documents: List[Dict[str, Any]],
+        embeddings: List[Any]
+    ) -> Optional[str]:
+        """Store document embeddings in ChromaDB for persistent retrieval"""
+        if self.chroma_client is None:
+            return None
+        
+        try:
+            collection_name = f"user_{user_id.replace('-', '_')[:50]}"
+            
+            # Delete existing collection for this user (rebuild)
+            try:
+                self.chroma_client.delete_collection(collection_name)
+            except Exception:
+                pass
+            
+            collection = self.chroma_client.get_or_create_collection(
+                name=collection_name,
+                metadata={"user_id": user_id, "created_at": datetime.now().isoformat()}
+            )
+            
+            # Add documents with embeddings
+            ids = []
+            docs = []
+            metadatas = []
+            embs = []
+            
+            for i, doc in enumerate(documents):
+                doc_id = f"{user_id}_doc_{i}"
+                ids.append(doc_id)
+                docs.append(doc["text"][:5000])  # ChromaDB text limit
+                metadatas.append({
+                    "filename": doc["filename"],
+                    "doc_type": doc["doc_type"],
+                    "user_id": user_id
+                })
+                if i < len(embeddings):
+                    embs.append(embeddings[i])
+            
+            if embs:
+                collection.add(
+                    ids=ids,
+                    documents=docs,
+                    metadatas=metadatas,
+                    embeddings=embs
+                )
+            else:
+                collection.add(
+                    ids=ids,
+                    documents=docs,
+                    metadatas=metadatas
+                )
+            
+            logger.info("Stored %d documents in ChromaDB for user %s", len(ids), user_id)
+            return collection_name
+            
+        except Exception as e:
+            logger.error("ChromaDB storage error: %s", e)
+            return None
+    
+    def _save_profile(
+        self,
+        user_id: str,
+        profile: Dict[str, Any],
+        questions: List[Dict[str, Any]]
+    ):
+        """Save profile and questions to disk for persistence"""
+        try:
+            os.makedirs(PROFILES_DIR, exist_ok=True)
+            
+            profile_path = os.path.join(PROFILES_DIR, f"{user_id}.json")
+            data = {
+                "user_id": user_id,
+                "profile": profile,
+                "questions": questions,
+                "created_at": datetime.now().isoformat()
+            }
+            
+            with open(profile_path, 'w') as f:
+                json.dump(data, f, indent=2)
+            
+            logger.info("Profile saved — %s", profile_path)
+        except Exception as e:
+            logger.error("Failed to save profile for user %s: %s", user_id, e)
+    
+    async def get_user_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a previously saved user profile"""
+        try:
+            profile_path = os.path.join(PROFILES_DIR, f"{user_id}.json")
+            if os.path.exists(profile_path):
+                with open(profile_path, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.error("Failed to load profile for user %s: %s", user_id, e)
+        return None
+    
+    async def query_documents(
+        self,
+        user_id: str,
+        query: str,
+        n_results: int = 3
+    ) -> List[Dict[str, Any]]:
+        """Query stored documents for a user using semantic search"""
+        if self.chroma_client is None or self.embedding_model is None:
+            return []
+        
+        try:
+            collection_name = f"user_{user_id.replace('-', '_')[:50]}"
+            collection = self.chroma_client.get_collection(collection_name)
+            
+            # Generate query embedding
+            loop = asyncio.get_event_loop()
+            query_embedding = await loop.run_in_executor(
+                None,
+                lambda: self.embedding_model.encode([query]).tolist()[0]
+            )
+            
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=min(n_results, collection.count())
+            )
+            
+            documents = []
+            if results and results['documents']:
+                for i, doc in enumerate(results['documents'][0]):
+                    documents.append({
+                        "text": doc,
+                        "metadata": results['metadatas'][0][i] if results['metadatas'] else {},
+                        "distance": results['distances'][0][i] if results['distances'] else None
+                    })
+            
+            return documents
+            
+        except Exception as e:
+            logger.error("ChromaDB query error for user %s: %s", user_id, e)
+            return []
     
     async def _process_documents(
         self,

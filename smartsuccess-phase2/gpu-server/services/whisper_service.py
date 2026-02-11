@@ -8,11 +8,15 @@ Languages: 99+ languages supported
 """
 
 import os
+import logging
 import tempfile
+import time
 import asyncio
 from typing import Optional, Dict, Any
 
 import torch
+
+logger = logging.getLogger("gpu.stt.whisper")
 
 
 class WhisperService:
@@ -37,15 +41,16 @@ class WhisperService:
         try:
             import whisper
             
-            print(f"Loading Whisper {self.model_size} on {self.device}...")
+            logger.info("Loading Whisper %s on %s...", self.model_size, self.device)
+            t0 = time.perf_counter()
             self.model = whisper.load_model(self.model_size, device=self.device)
-            print(f"Whisper loaded successfully")
+            logger.info("Whisper loaded successfully in %.1fs", time.perf_counter() - t0)
             
         except ImportError:
-            print("WARNING: whisper not installed. Install with: pip install openai-whisper")
+            logger.error("whisper package not installed — STT will be unavailable")
             self.model = None
         except Exception as e:
-            print(f"Error loading Whisper: {e}")
+            logger.error("Failed to load Whisper model: %s", e)
             self.model = None
     
     async def transcribe(
@@ -71,14 +76,23 @@ class WhisperService:
             f.write(audio_data)
             temp_path = f.name
         
+        logger.debug("Temp audio file written — %d bytes → %s", len(audio_data), temp_path)
+        
         try:
             # Run transcription in thread pool (CPU-bound)
+            t0 = time.perf_counter()
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 None,
                 self._transcribe_sync,
                 temp_path,
                 language
+            )
+            inference_ms = (time.perf_counter() - t0) * 1000
+            
+            logger.debug(
+                "Whisper inference — %.0fms | segments=%d",
+                inference_ms, len(result.get("segments", [])),
             )
             
             return result

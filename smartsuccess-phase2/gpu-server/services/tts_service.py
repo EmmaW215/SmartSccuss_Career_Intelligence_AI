@@ -8,9 +8,13 @@ Quality: Human-like, emotional, natural prosody
 
 import os
 import io
+import logging
+import time
 import asyncio
 from typing import Optional, Dict
 import torch
+
+logger = logging.getLogger("gpu.tts.engine")
 
 
 class TTSService:
@@ -47,45 +51,76 @@ class TTSService:
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model = None
+        self.is_multilingual = False
+        self.is_multi_speaker = False
+        self.default_speaker = None
         
         self._load_model()
     
     def _load_model(self):
-        """Load XTTS model"""
+        """Load XTTS model with timeout fallback"""
         try:
             from TTS.api import TTS
             
-            print(f"Loading XTTS-v2 on {self.device}...")
+            # Try XTTS-v2 first (multilingual, best quality)
+            try:
+                logger.info("Attempting XTTS-v2 on %s (best quality)...", self.device)
+                t0 = time.perf_counter()
+                self.model = TTS(
+                    model_name="tts_models/multilingual/multi-dataset/xtts_v2",
+                    progress_bar=False
+                ).to(self.device)
+                self.is_multilingual = True
+                logger.info("XTTS-v2 loaded in %.1fs (multilingual)", time.perf_counter() - t0)
+                return
+            except Exception as e:
+                logger.warning("DEGRADATION: XTTS-v2 failed — %s — trying VITS fallback", e)
             
-            # XTTS v2 - best quality
-            self.model = TTS(
-                model_name="tts_models/multilingual/multi-dataset/xtts_v2",
-                progress_bar=False
-            ).to(self.device)
+            # Try VITS multilingual (lighter, still multilingual)
+            try:
+                logger.info("Attempting VITS multilingual (fallback #1)...")
+                t0 = time.perf_counter()
+                self.model = TTS(
+                    model_name="tts_models/multilingual/multi-dataset/your_tts",
+                    progress_bar=False
+                ).to(self.device)
+                self.is_multilingual = True
+                self.is_multi_speaker = True
+                self.default_speaker = "male-en-2"
+                logger.info(
+                    "VITS multilingual loaded in %.1fs (speaker: %s)",
+                    time.perf_counter() - t0, self.default_speaker,
+                )
+                return
+            except Exception as e:
+                logger.warning("DEGRADATION: VITS multilingual failed — %s — trying English-only fallback", e)
             
-            print("XTTS-v2 loaded successfully")
+            # Fallback to English-only model
+            self._load_fallback()
             
         except ImportError:
-            print("WARNING: TTS not installed. Install with: pip install TTS")
-            self._load_fallback()
-        except Exception as e:
-            print(f"Error loading XTTS: {e}")
+            logger.error("TTS package not installed — attempting minimal fallback")
             self._load_fallback()
     
     def _load_fallback(self):
-        """Load fallback TTS model"""
+        """Load fallback TTS model (English only)"""
         try:
             from TTS.api import TTS
             
-            print("Loading fallback TTS model...")
+            logger.warning("DEGRADATION: Loading tacotron2-DDC (English only, lowest quality)...")
+            t0 = time.perf_counter()
             self.model = TTS(
                 model_name="tts_models/en/ljspeech/tacotron2-DDC",
                 progress_bar=False
             ).to(self.device)
-            print("Fallback TTS loaded")
+            self.is_multilingual = False
+            logger.warning(
+                "Fallback TTS loaded in %.1fs — English only, reduced quality",
+                time.perf_counter() - t0,
+            )
             
         except Exception as e:
-            print(f"Fallback TTS also failed: {e}")
+            logger.critical("ALL TTS models failed — TTS will be unavailable: %s", e)
             self.model = None
     
     async def synthesize(
@@ -121,6 +156,7 @@ class TTSService:
             processed_text = self._apply_emotion(processed_text, emotion)
         
         # Run synthesis in thread pool
+        t0 = time.perf_counter()
         loop = asyncio.get_event_loop()
         audio_data = await loop.run_in_executor(
             None,
@@ -128,6 +164,12 @@ class TTSService:
             processed_text,
             voice_config,
             language
+        )
+        inference_ms = (time.perf_counter() - t0) * 1000
+        
+        logger.debug(
+            "TTS inference — %.0fms | %d chars → %d bytes",
+            inference_ms, len(processed_text), len(audio_data),
         )
         
         return audio_data
@@ -140,27 +182,29 @@ class TTSService:
     ) -> bytes:
         """Synchronous synthesis"""
         import tempfile
-        import wave
         
         # Create temp file for output
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             temp_path = f.name
         
         try:
+            # Build kwargs based on model capabilities
+            kwargs = {
+                "text": text,
+                "file_path": temp_path,
+            }
+            
+            if self.is_multilingual:
+                kwargs["language"] = language
+                speed = voice_config.get("speed", 1.0)
+                if speed != 1.0:
+                    kwargs["speed"] = speed
+            
+            if self.is_multi_speaker and self.default_speaker:
+                kwargs["speaker"] = self.default_speaker
+            
             # Generate audio
-            if hasattr(self.model, 'tts_to_file'):
-                self.model.tts_to_file(
-                    text=text,
-                    file_path=temp_path,
-                    language=language,
-                    speed=voice_config.get("speed", 1.0)
-                )
-            else:
-                # Fallback for simpler models
-                self.model.tts_to_file(
-                    text=text,
-                    file_path=temp_path
-                )
+            self.model.tts_to_file(**kwargs)
             
             # Read audio data
             with open(temp_path, "rb") as f:
