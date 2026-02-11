@@ -1180,7 +1180,7 @@ MIT License - see LICENSE file for details
 ## 📞 Support
 
 For issues, questions, or contributions:
-- GitHub Issues: [Create an issue](https://github.com/yourusername/smartsuccess-ai/issues)
+- GitHub Issues: [Create an issue](https://github.com/EmmaW215/SmartSccuss_Career_Intelligence_AI/issues)
 - Email: support@smartsuccess.ai
 
 ---
@@ -1189,7 +1189,7 @@ For issues, questions, or contributions:
 
 **Built with ❤️ for the next generation of AI leaders**
 
-[Website](https://smartsuccess.ai) • [Documentation](#) • [GitHub](https://github.com/yourusername/smartsuccess-ai)
+[Website]([https://smartsuccess.ai](https://smart-sccuss-career-intelligence-ai.vercel.app/)) • [Documentation](#) • [GitHub]([https://github.com/yourusername/smartsuccess-ai](https://github.com/EmmaW215/SmartSccuss_Career_Intelligence_AI))
 
 </div>
 
