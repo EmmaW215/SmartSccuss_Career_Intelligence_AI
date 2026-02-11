@@ -53,11 +53,13 @@ async def transcribe_audio(
     - **audio**: Audio file (mp3, wav, webm, m4a, etc.)
     - **language**: ISO language code (default: en)
     """
+    # Read audio data once upfront so both GPU and fallback paths can use it
+    audio_data = await audio.read()
+    
     # Phase 2: Try GPU server if enabled
     if GPU_AVAILABLE and getattr(settings, 'use_gpu_voice', False):
         try:
             gpu_client = get_gpu_client()
-            audio_data = await audio.read()
             transcript, provider = await gpu_client.transcribe(audio_data, language)
             return {
                 "text": transcript,
@@ -78,7 +80,6 @@ async def transcribe_audio(
         )
     
     try:
-        audio_data = await audio.read()
         text = await voice_service.transcribe(audio_data, language)
         
         return {
