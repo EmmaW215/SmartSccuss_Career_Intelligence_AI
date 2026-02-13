@@ -34,3 +34,12 @@ pytest-asyncio>=0.23.0
 # Optional: Additional utilities
 tenacity>=8.2.0  # Retry logic
 structlog>=24.1.0  # Structured logging
+
+# MatchWise module dependencies
+stripe>=8.0.0  # Stripe payments
+firebase-admin>=6.9.0  # Firebase Admin SDK
+PyPDF2>=3.0.0  # PDF text extraction
+python-docx>=1.1.0  # DOCX text extraction
+beautifulsoup4>=4.12.0  # HTML parsing
+requests>=2.31.0  # HTTP requests
+aiohttp>=3.9.0  # Async HTTP client

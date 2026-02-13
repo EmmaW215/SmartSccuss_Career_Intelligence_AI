@@ -11,8 +11,7 @@
     ],
     "skipLibCheck": true,
     "types": [
-      "node",
-      "vite/client"
+      "node"
     ],
     "moduleResolution": "bundler",
     "isolatedModules": true,
@@ -26,13 +25,5 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  },
-  "exclude": [
-    "node_modules",
-    "matchwise-ai-v2",
-    "_temp_clone",
-    "smartsuccess-interview-backend",
-    "smartsuccess-ai-lab",
-    "smartsuccess-phase2"
-  ]
+  }
 }

@@ -1,4 +1,4 @@
-export type ViewState = 'landing' | 'interview' | 'dashboard' | 'demo' | 'lab' | 'sample-analysis';
+export type ViewState = 'landing' | 'interview' | 'dashboard' | 'demo' | 'lab' | 'sample-analysis' | 'matchwise-live';
 
 export enum InterviewType {
   SCREENING = 'Screening Interview',

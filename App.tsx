@@ -9,6 +9,7 @@ import { LabSkillsLabPage } from './views/LabSkillsLabPage';
 import { LabWorkspace } from './views/LabWorkspace';
 import { LabResultsView } from './views/LabResultsView';
 import { SampleAnalysisPage } from './views/SampleAnalysisPage';
+import MatchwiseApp from './views/matchwise/MatchwiseApp';
 import { AuthProvider } from './contexts/AuthContext';
 import { AccessModals } from './components/AccessModals';
 import { LAB_MOCK_RESULTS } from './constants/labChallenges';
@@ -70,7 +71,12 @@ function AppContent() {
           <DemoPage 
             onBack={() => setCurrentView('interview')} 
             onViewSample={() => setCurrentView('sample-analysis')}
+            onTryLive={() => setCurrentView('matchwise-live')}
           />
+        )}
+
+        {currentView === 'matchwise-live' && (
+          <MatchwiseApp onBack={() => setCurrentView('demo')} />
         )}
 
         {currentView === 'lab' && (

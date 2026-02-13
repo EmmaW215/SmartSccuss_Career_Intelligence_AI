@@ -31,6 +31,15 @@ except ImportError:
     customize = None
     dashboard = None
 
+# MatchWise module: Optional (only loaded if dependencies available)
+try:
+    from app.api.routes import matchwise
+    MATCHWISE_AVAILABLE = True
+except ImportError as e:
+    MATCHWISE_AVAILABLE = False
+    matchwise = None
+    print(f"⚠️  MatchWise module not loaded: {e}")
+
 # Lifespan context manager for startup/shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -132,6 +141,11 @@ if PHASE2_AVAILABLE and customize and dashboard:
     app.include_router(dashboard.router)
     print("✅ Phase 2 routes (customize, dashboard) enabled")
 
+# MatchWise: Include MatchWise router (only if available)
+if MATCHWISE_AVAILABLE and matchwise:
+    app.include_router(matchwise.router)
+    print("✅ MatchWise routes (/api/matchwise/*) enabled")
+
 # Root endpoint
 @app.get("/")
 async def root():
@@ -151,6 +165,10 @@ async def root():
             "available": PHASE2_AVAILABLE,
             "customize": "/api/interview/customize" if PHASE2_AVAILABLE else None,
             "dashboard": "/api/dashboard" if PHASE2_AVAILABLE else None
+        },
+        "matchwise": {
+            "available": MATCHWISE_AVAILABLE,
+            "endpoints": "/api/matchwise" if MATCHWISE_AVAILABLE else None
         }
     }
 

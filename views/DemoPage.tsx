@@ -1,13 +1,14 @@
 import React from 'react';
-import { ArrowRight, CheckCircle2, FileText, ChevronLeft, ExternalLink } from 'lucide-react';
+import { ArrowRight, CheckCircle2, FileText, ChevronLeft } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 interface DemoPageProps {
     onBack: () => void;
     onViewSample: () => void;
+    onTryLive?: () => void;
 }
 
-export const DemoPage: React.FC<DemoPageProps> = ({ onBack, onViewSample }) => {
+export const DemoPage: React.FC<DemoPageProps> = ({ onBack, onViewSample, onTryLive }) => {
   const { isAuthenticated, triggerLogin } = useAuth();
 
   const handleTryLive = (e: React.MouseEvent) => {
@@ -16,7 +17,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({ onBack, onViewSample }) => {
       triggerLogin();
       return;
     }
-    window.open("https://matchwise-ai.vercel.app/", "_blank");
+    // Navigate to the integrated MatchWise Live page within SmartSuccess.AI
+    if (onTryLive) {
+      onTryLive();
+    }
   };
 
   const handleViewSample = () => {
@@ -64,7 +68,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({ onBack, onViewSample }) => {
                         onClick={handleTryLive}
                         className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-gray-900 text-white font-semibold rounded-xl hover:bg-gray-800 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                     >
-                        Try MatchWise Live <ExternalLink size={16} />
+                        Try MatchWise Live <ArrowRight size={16} />
                     </button>
                     <button 
                         onClick={handleViewSample}
