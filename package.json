@@ -9,13 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "recharts": "^3.7.0",
-    "react": "^19.2.3",
-    "lucide-react": "^0.562.0",
-    "react-dom": "^19.2.3",
     "@google/genai": "^1.38.0",
+    "@stripe/stripe-js": "^8.6.4",
+    "@types/dompurify": "^3.0.5",
+    "dompurify": "^3.3.1",
     "firebase": "^11.8.0",
-    "@stripe/stripe-js": "^8.6.4"
+    "lucide-react": "^0.562.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "recharts": "^3.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

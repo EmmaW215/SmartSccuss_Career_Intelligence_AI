@@ -1,5 +1,22 @@
 import React from 'react';
+import DOMPurify from 'dompurify';
 import { ComparisonResponse } from '../types';
+
+// Allowed HTML tags for LLM output — blocks scripts, iframes, etc. (XSS prevention)
+const SANITIZE_CONFIG = {
+  ALLOWED_TAGS: [
+    'p', 'br', 'ul', 'ol', 'li', 'strong', 'em', 'b', 'i',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td',
+    'h1', 'h2', 'h3', 'h4', 'span', 'div', 'a',
+  ],
+  ALLOWED_ATTR: ['class', 'style', 'href', 'target', 'rel'],
+};
+
+/** Sanitize LLM-generated HTML to prevent XSS attacks */
+const SafeHTML: React.FC<{ html: string; className?: string }> = ({ html, className }) => {
+  const clean = DOMPurify.sanitize(html, SANITIZE_CONFIG);
+  return <div className={className} dangerouslySetInnerHTML={{ __html: clean }} />;
+};
 
 interface ResultsDisplayProps {
   data: ComparisonResponse;
@@ -20,9 +37,9 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ data }) => {
           <div className="w-1.5 h-8 bg-blue-500 rounded-full mr-4 group-hover:h-10 transition-all duration-300"></div>
           <span className="text-xl font-bold text-gray-800">Job Requirement Summary</span>
         </div>
-        <div 
+        <SafeHTML
           className="ml-6 text-gray-700 leading-relaxed prose prose-blue max-w-none"
-          dangerouslySetInnerHTML={{ __html: data.job_summary || 'No job summary available.' }}
+          html={data.job_summary || 'No job summary available.'}
         />
       </div>
 
@@ -33,9 +50,9 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ data }) => {
           <span className="text-xl font-bold text-gray-800">Comparison Table</span>
         </div>
         <div className="ml-6 overflow-x-auto">
-          <div 
+          <SafeHTML
             className="resume-table-html text-gray-700 text-sm"
-            dangerouslySetInnerHTML={{ __html: data.resume_summary }}
+            html={data.resume_summary}
           />
         </div>
       </div>
@@ -65,9 +82,9 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ data }) => {
           <div className="w-1.5 h-8 bg-pink-500 rounded-full mr-4 group-hover:h-10 transition-all duration-300"></div>
           <span className="text-xl font-bold text-gray-800">Tailored Resume Summary</span>
         </div>
-        <div 
+        <SafeHTML
           className="ml-6 text-gray-700 leading-relaxed prose prose-pink max-w-none bg-pink-50/50 p-4 rounded-lg border border-pink-100"
-          dangerouslySetInnerHTML={{ __html: data.tailored_resume_summary || 'No tailored resume summary available.' }}
+          html={data.tailored_resume_summary || 'No tailored resume summary available.'}
         />
       </div>
 
@@ -77,13 +94,13 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ data }) => {
           <div className="w-1.5 h-8 bg-orange-500 rounded-full mr-4 group-hover:h-10 transition-all duration-300"></div>
           <span className="text-xl font-bold text-gray-800">Suggested Work Experience</span>
         </div>
-        <div 
+        <SafeHTML
           className="ml-6 text-gray-700 leading-relaxed prose prose-orange max-w-none"
-          dangerouslySetInnerHTML={{ 
-            __html: Array.isArray(data.tailored_work_experience) 
+          html={
+            Array.isArray(data.tailored_work_experience) 
               ? data.tailored_work_experience.join('') 
               : (data.tailored_work_experience || '<ul><li>No tailored work experience provided.</li></ul>')
-          }}
+          }
         />
       </div>
 
@@ -93,9 +110,9 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ data }) => {
           <div className="w-1.5 h-8 bg-teal-500 rounded-full mr-4 group-hover:h-10 transition-all duration-300"></div>
           <span className="text-xl font-bold text-gray-800">Draft Cover Letter</span>
         </div>
-        <div 
+        <SafeHTML
           className="bg-teal-50/50 border border-teal-100 rounded-xl p-6 ml-6 text-gray-700 leading-relaxed font-serif"
-          dangerouslySetInnerHTML={{ __html: data.cover_letter || 'No cover letter available.' }}
+          html={data.cover_letter || 'No cover letter available.'}
         />
       </div>
     </div>

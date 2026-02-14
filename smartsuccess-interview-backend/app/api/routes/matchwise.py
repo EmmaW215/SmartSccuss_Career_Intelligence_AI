@@ -184,10 +184,22 @@ class MatchwiseUserStatus:
 
 
 # ============================================================================
+# Per-Prompt Token Budget Configuration
+# Different output types need different token limits to avoid truncation
+# ============================================================================
+TOKEN_BUDGETS = {
+    "job_summary": 1500,
+    "comparison": 2500,
+    "resume_summary": 800,
+    "work_experience": 1500,
+    "cover_letter": 3000,   # Cover letters need significantly more tokens
+}
+
+# ============================================================================
 # Zero-Cost AI Fallback Architecture
 # Groq → Gemini → OpenRouter
 # ============================================================================
-async def call_groq_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.") -> str:
+async def call_groq_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", max_tokens: int = 2000) -> str:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise Exception("GROQ_API_KEY not set")
@@ -200,8 +212,8 @@ async def call_groq_api(prompt: str, system_prompt: str = "You are a helpful AI 
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            "max_tokens": 2000,
-            "temperature": 0.3
+            "max_tokens": max_tokens,
+            "temperature": 0.2
         }
         try:
             async with session.post(
@@ -220,7 +232,7 @@ async def call_groq_api(prompt: str, system_prompt: str = "You are a helpful AI 
             raise Exception(f"Groq API request failed: {str(e)}")
 
 
-async def call_gemini_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.") -> str:
+async def call_gemini_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", max_tokens: int = 2000) -> str:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise Exception("GEMINI_API_KEY not set")
@@ -231,7 +243,7 @@ async def call_gemini_api(prompt: str, system_prompt: str = "You are a helpful A
         headers = {"Content-Type": "application/json"}
         data = {
             "contents": [{"parts": [{"text": f"{system_prompt}\n\n{prompt}"}]}],
-            "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.3}
+            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.2}
         }
         try:
             async with session.post(url, headers=headers, json=data, timeout=aiohttp.ClientTimeout(total=30)) as response:
@@ -254,7 +266,7 @@ OPENROUTER_FREE_MODELS = [
     "meta-llama/llama-3.2-3b-instruct:free",   # Meta Llama confirmed free variant
 ]
 
-async def call_openrouter_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", model_index: int = 0) -> str:
+async def call_openrouter_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", max_tokens: int = 2000, model_index: int = 0) -> str:
     if model_index >= len(OPENROUTER_FREE_MODELS):
         raise Exception("All OpenRouter free models exhausted")
 
@@ -277,8 +289,8 @@ async def call_openrouter_api(prompt: str, system_prompt: str = "You are a helpf
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            "max_tokens": 2000,
-            "temperature": 0.3
+            "max_tokens": max_tokens,
+            "temperature": 0.2
         }
         try:
             async with session.post(
@@ -288,7 +300,7 @@ async def call_openrouter_api(prompt: str, system_prompt: str = "You are a helpf
             ) as response:
                 if response.status == 429:
                     print(f"⚠️ OpenRouter model {model} rate limited, trying next...")
-                    return await call_openrouter_api(prompt, system_prompt, model_index + 1)
+                    return await call_openrouter_api(prompt, system_prompt, max_tokens, model_index + 1)
                 if response.status != 200:
                     error_text = await response.text()
                     raise Exception(f"OpenRouter API error ({model}): {response.status} - {error_text}")
@@ -298,27 +310,33 @@ async def call_openrouter_api(prompt: str, system_prompt: str = "You are a helpf
             raise Exception(f"OpenRouter API request failed ({model}): {str(e)}")
 
 
-async def call_ai_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.") -> str:
-    """Zero-Cost Triple Fallback: Groq → Gemini → OpenRouter"""
+async def call_ai_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", max_tokens: int = 2000) -> str:
+    """Zero-Cost Triple Fallback: Groq → Gemini → OpenRouter
+    
+    Args:
+        prompt: The user prompt to send
+        system_prompt: System-level instruction for the LLM
+        max_tokens: Per-prompt token budget (varies by output type)
+    """
     try:
-        print("🔵 [Matchwise] AI Layer 1: Attempting Groq...")
-        result = await call_groq_api(prompt, system_prompt)
+        print(f"🔵 [Matchwise] AI Layer 1: Attempting Groq (max_tokens={max_tokens})...")
+        result = await call_groq_api(prompt, system_prompt, max_tokens)
         print("✅ [Matchwise] AI Layer 1 SUCCESS: Groq")
         return result
     except Exception as groq_error:
         print(f"⚠️ [Matchwise] AI Layer 1 FAILED (Groq): {groq_error}")
 
     try:
-        print("🟡 [Matchwise] AI Layer 2: Attempting Gemini...")
-        result = await call_gemini_api(prompt, system_prompt)
+        print(f"🟡 [Matchwise] AI Layer 2: Attempting Gemini (max_tokens={max_tokens})...")
+        result = await call_gemini_api(prompt, system_prompt, max_tokens)
         print("✅ [Matchwise] AI Layer 2 SUCCESS: Gemini")
         return result
     except Exception as gemini_error:
         print(f"⚠️ [Matchwise] AI Layer 2 FAILED (Gemini): {gemini_error}")
 
     try:
-        print("🟠 [Matchwise] AI Layer 3: Attempting OpenRouter...")
-        result = await call_openrouter_api(prompt, system_prompt)
+        print(f"🟠 [Matchwise] AI Layer 3: Attempting OpenRouter (max_tokens={max_tokens})...")
+        result = await call_openrouter_api(prompt, system_prompt, max_tokens)
         print("✅ [Matchwise] AI Layer 3 SUCCESS: OpenRouter")
         return result
     except Exception as openrouter_error:
@@ -364,7 +382,7 @@ async def compare_texts(job_text: str, resume_text: str) -> dict:
             f"{job_text}\n\n"
             "Summarize the job descriptions by extracting and organizing the following information into a clean HTML bullet list format:             <ul>            <li><strong> Ø Position Title: </strong> [extract the job title]</li>            <li><strong> Ø Position Location: </strong> [extract the location]</li>            <li><strong> Ø Potential Salary: </strong> [extract salary information if available]</li>            <li><strong> Ø Job Responsibilities: </strong>            <ul>                  <li>•     Ø [responsibility 1]</li>                   <li>•     Ø [responsibility 2]</li>                   <li>•     Ø [responsibility 3]</li>                  <li>•     Ø [responsibility 4]</li> <li>•     Ø [responsibility 5]</li>  <li>•     Ø [responsibility 6]</li>    <li>•     Ø [responsibility 7]</li>   <li>•     Ø [responsibility 8]</li>      </ul>             </li>             <li><strong> Ø Technical Skills Required: </strong>               <ul>                 <li>•     Ø [tech skill 1]</li>                 <li>•     Ø [tech skill 2]</li>                 <li>•     Ø [tech skill 3]</li>                 <li>•     Ø [tech skill 4]</li>    <li>•     Ø [tech skill 5]</li>   <li>•     Ø [tech skill 6]</li>   <li>•     Ø [tech skill 7]</li>   <li>•     Ø [tech skill 8]</li>  </ul>             </li>             <li><strong> Ø Soft Skills Required: </strong>               <ul>                 <li>•     Ø [soft skill 1]</li>                 <li>•     Ø [soft skill 2]</li>                 <li>•     Ø [soft skill 3]</li>                 <li>•     Ø [soft skill 4]</li>   <li>•     Ø [soft skill 5]</li>  <li>•     Ø [soft skill 6]</li>  <li>•     Ø [soft skill 7]</li>           </ul>             </li>             <li><strong> Ø Certifications Required: </strong> [extract certification requirements]</li>             <li><strong> Ø Education Required: </strong> [extract education requirements]</li>             <li><strong> Ø Company Vision: </strong> [extract company vision/mission if available]</li>             </ul>\n            Please extract the actual information from the job posting. Using the structure above, organize the output into a clean HTML bullet list format. If any information is not available in the job posting, use 'Not specified' for that item. Ensure the output is clean, well-structured, and uses proper HTML bullet list formatting. Maintain 1.2 line spacing. Do not show the word ```html in output."
         )
-        job_summary = await call_ai_api(job_summary_prompt)
+        job_summary = await call_ai_api(job_summary_prompt, max_tokens=TOKEN_BUDGETS["job_summary"])
         job_summary = f"\n\n {job_summary}"
 
         # b. Resume Summary with Comparison Table
@@ -375,7 +393,7 @@ async def compare_texts(job_text: str, resume_text: str) -> dict:
             f"{job_summary}\n\n"
             "Output a comparison table between the job_summary and the upload user resume. List in the table format with Four columns: Categories (list all the key requirements regarding position responsibilities, technical and soft skills, certifications, and educations from the job requirements, each key requirement in one line), Match Status (four status will be used: ✅ Strong (the item is also mentioned in the user's resume and very well-matched with what mentioned in job_summary_prompt) / 🔷 Moderate-strong (the item is also mentioned in the user's resume and closely matched with what mentioned in job_summary_prompt)/⚠️ Partial (the item is kind of mentioned in the user's resume and some parts matched with what mentioned in job_summary_prompt)/ ❌ Lack (the item is not clearly mentioned in the user's resume and only little bit or not match with what mentioned in job_summary_prompt)), Comments (very precise comment on how the user's experiences matches with the job requirement), and Match Weight (If the Match Status is Strong, assign number 1; If the Match Status is Moderate-Strong, assign number 0.8; If the Match Status is Partial, assign number 0.5; If the Match Status is Lack, assign number 0.1). Make sure to output the table in HTML format, with <table>, <tr>, <th>, <td> tags, and do not add any explanation or extra text. The table should be styled to look clean and modern. Only output the table in HTML format, with <table>, <tr>, <th>, <td> tags, and do not add any explanation or extra text. The table should be styled to look clean and modern. Below the table, based on the Match Weight column from job_summary comparison table, calculates the percentage of the matching score. The calculation formulas are: Sum of total Match Weight numbers = sum of all numbers in the Match Weight column; Count of total Match Weight numbers = count of all numbers in the Match Weight column; Match Score (%) =(Sum of total Match Weight numbers)/(Count of total Match Weight numbers). Return the final calculation results of Sum of total Match Weight numbers, Count of total Match Weight numbers, and Match Score as the final percentage number, rounded to two decimal places. No extra text, do not show ``` symbols or word html in output. "
         )
-        resume_summary = await call_ai_api(resume_summary_prompt)
+        resume_summary = await call_ai_api(resume_summary_prompt, max_tokens=TOKEN_BUDGETS["comparison"])
         resume_summary = f"\n\n{resume_summary}"
 
         # Match Score extraction
@@ -405,7 +423,7 @@ async def compare_texts(job_text: str, resume_text: str) -> dict:
             f"{job_text}\n\n"
             "Provide a revised one-paragraph summary based on the original summary in resume_text (the user's resume). If the user's resume does not have a summary or highlight section, write a new summary as the revised summary. Make sure this summary highlights the user's key skills and work experiences and makes it more closely match the job requirements in job_text. Please limit the overall summary to 1700 characters. The output should be in HTML format and should maintain a simple, modern style. Write this paragraph in the first person. Maintain 1.2 line spacing. Do not show the word ```html in output."
         )
-        tailored_resume_summary = await call_ai_api(tailored_resume_summary_prompt)
+        tailored_resume_summary = await call_ai_api(tailored_resume_summary_prompt, max_tokens=TOKEN_BUDGETS["resume_summary"])
         tailored_resume_summary = f"\n{tailored_resume_summary}"
 
         # d. Tailored Work Experience
@@ -416,17 +434,28 @@ async def compare_texts(job_text: str, resume_text: str) -> dict:
             f"{job_text}\n\n"
             "Find the latest work experiences from the resume and modify them to better match the job requirements. Format the output as a clean HTML unordered list with no more than 7 bullet points:              <ul>             <li>     Ø  [revised work experience bullet 1]</li>             <li>     Ø  [revised work experience bullet 2]</li>             <li>     Ø  [revised work experience bullet 3]</li>             <li>     Ø  [revised work experience bullet 4]</li>             <li>     Ø  [revised work experience bullet 5]</li>             <li>     Ø  [revised work experience bullet 6]</li>             <li>     Ø  [revised work experience bullet 7]</li>             </ul>             Please provide the actual revised work experience content. Organize the output into a clean HTML bullet list using the structure above. Return the result wrapped inside triple backticks and identify the language as HTML. Focus on the most recent and relevant experiences that align with the job requirements. Keep each bullet point concise and impactful. Make sure there are line breaks between each paragraph. Ensure the output uses proper HTML bullet list formatting. Maintain 1.2 line spacing.  Do not show the word ```html in output."
         )
-        tailored_work_experience_html = await call_ai_api(tailored_work_experience_prompt)
+        tailored_work_experience_html = await call_ai_api(tailored_work_experience_prompt, max_tokens=TOKEN_BUDGETS["work_experience"])
 
-        # e. Cover Letter
+        # e. Cover Letter (with anti-hallucination guardrails)
         cover_letter_prompt = (
-            "Read the following resume content:\n\n"
+            "Write a professional cover letter for the following job application.\n\n"
+            "APPLICANT'S ACTUAL BACKGROUND (from resume):\n"
             f"{resume_text}\n\n"
-            "And the following job content:\n\n"
+            "JOB POSTING:\n"
             f"{job_text}\n\n"
-            "Provide a formal cover letter for the job application. The job position and the company name in the cover letter for applying should be the same as what being used in the job_text. The cover letter should show the user's key strengths and highlight the user's best fit skills and experiences according to the job posting in job_text, then express the user's passions for the position, and express appreciation for a future interview opportunity. The overall tone of the cover letter should be confident, honest, and professional. The cover letters should be written in the first person. Only output in HTML format, using <p> and <br> tags for formatting. Make sure there are line breaks between each paragraph. Do not output markdown or plain text. Do not show ```html in output. "
+            "STRICT RULES YOU MUST FOLLOW:\n"
+            "1. Start the letter with 'Dear Hiring Manager,' — do NOT use any person's name from the job posting or resume.\n"
+            "2. End the letter with 'Sincerely,' followed by a blank line for the applicant's signature (use '[Your Name]' as placeholder).\n"
+            "3. ONLY reference skills, technologies, and experiences that ACTUALLY appear in the resume above. Do NOT fabricate or invent any experience the applicant does not have.\n"
+            "4. If the applicant lacks a required skill, frame adjacent experience as transferable (e.g., 'My experience in X provides a strong foundation for Y').\n"
+            "5. Extract the correct job title and company name from the job posting and use them in the letter.\n"
+            "6. Write exactly 4 paragraphs: (a) opening hook with position and company, (b) relevant technical experience, (c) soft skills and cultural fit, (d) closing with enthusiasm and interview request.\n"
+            "7. Keep the letter between 400-600 words. The tone should be confident, honest, and professional.\n"
+            "8. Write in the first person.\n"
+            "9. Output ONLY in HTML format using <p> tags for paragraphs. No markdown, no ```html, no extra text outside the letter.\n"
+            "10. Make sure there are line breaks between each paragraph.\n"
         )
-        cover_letter = await call_ai_api(cover_letter_prompt)
+        cover_letter = await call_ai_api(cover_letter_prompt, max_tokens=TOKEN_BUDGETS["cover_letter"])
         cover_letter = f"\n{cover_letter}"
 
         return {
