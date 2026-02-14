@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 import { User } from '../types';
 
 interface AuthContextType {
@@ -21,26 +21,27 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  // Synchronous initialization — avoids null user on first render frame
+  const [user, setUser] = useState<User | null>(() => {
+    const savedUser = localStorage.getItem('ss_user');
+    if (savedUser) {
+      try {
+        return JSON.parse(savedUser);
+      } catch {
+        // If localStorage data is corrupted, fall back to guest
+      }
+    }
+    return {
+      id: 'guest_123',
+      name: 'Guest User',
+      email: 'guest@smartsuccess.ai',
+      isPro: false,
+      type: 'guest'
+    };
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-
-  // Initialize with a Guest user if nothing is found
-  useEffect(() => {
-    const savedUser = localStorage.getItem('ss_user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    } else {
-      setUser({
-        id: 'guest_123',
-        name: 'Guest User',
-        email: 'guest@smartsuccess.ai',
-        isPro: false,
-        type: 'guest'
-      });
-    }
-  }, []);
 
   const login = async () => {
     setIsLoading(true);

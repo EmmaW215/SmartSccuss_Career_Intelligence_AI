@@ -69,26 +69,10 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
   
   const { user, login, isAuthenticated, isLoading, isPro, triggerLogin, triggerUpgrade } = useAuth();
 
-  // Show login prompt if not authenticated (similar to Dashboard)
-  if (!isAuthenticated) {
-    return (
-      <div className="h-full overflow-y-auto bg-gray-50/50 p-8 flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-800 mb-4">Please Login</h2>
-          <p className="text-gray-600 mb-6">You need to be logged in to initiate your Mock Interview.</p>
-          <button
-            onClick={triggerLogin}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Login
-          </button>
-        </div>
-      </div>
-    );
-  }
-
+  // ✅ All hooks MUST be called before any conditional return (React rules of hooks)
   // Initialize interview session when component mounts or interview type changes
   useEffect(() => {
+    if (!isAuthenticated) return; // Guard: only run when authenticated
 
     const initializeSession = async () => {
       try {
@@ -149,12 +133,11 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
 
   // Check microphone availability on mount (optional, non-blocking)
   useEffect(() => {
-    if (isAuthenticated) {
-      checkMicrophone().catch(err => {
-        // Don't show error to user unless they try to use it
-        console.warn('Microphone check failed:', err);
-      });
-    }
+    if (!isAuthenticated) return; // Guard: only run when authenticated
+    checkMicrophone().catch(err => {
+      // Don't show error to user unless they try to use it
+      console.warn('Microphone check failed:', err);
+    });
   }, [isAuthenticated, checkMicrophone]);
 
   // Cleanup session when component unmounts or interview type changes
@@ -170,6 +153,24 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Show login prompt if not authenticated (AFTER all hooks)
+  if (!isAuthenticated) {
+    return (
+      <div className="h-full overflow-y-auto bg-gray-50/50 p-8 flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">Please Login</h2>
+          <p className="text-gray-600 mb-6">You need to be logged in to initiate your Mock Interview.</p>
+          <button
+            onClick={triggerLogin}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            Login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const checkAccess = () => {
     if (!isAuthenticated) {

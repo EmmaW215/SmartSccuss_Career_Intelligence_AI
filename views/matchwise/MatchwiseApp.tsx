@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useRef } from "react";
 import { UploadCloud, FileText, Loader2, ChevronRight, ArrowLeft, CheckCircle, Crown, LogIn } from 'lucide-react';
 
-import VisitorCounter from './components/VisitorCounter';
 import ResultsDisplay from './components/ResultsDisplay';
 import { useParentMessage } from './hooks/useParentMessage';
 import { ComparisonResponse } from './types';
 import { useAuth } from '../../contexts/AuthContext';
+import SimpleVisitorCounter from '../../components/SimpleVisitorCounter';
 
 // Backend URL — points to SmartSuccess.AI backend's /api/matchwise prefix
 const BACKEND_URL = import.meta.env.VITE_MATCHWISE_BACKEND_URL 
@@ -35,7 +35,6 @@ const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
   const [trialUsed, setTrialUsed] = useState(false);
   
   // UI State
-  const [showVisitorCounter, setShowVisitorCounter] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Initialize — check if free trial was already used
@@ -49,7 +48,6 @@ const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
     showLoginModal: () => {
       triggerLogin();
     },
-    hideVisitorCounter: () => setShowVisitorCounter(false),
   });
 
   // Logic Helpers
@@ -206,7 +204,7 @@ const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
         
         <div className="flex items-center gap-4">
           <div className="hidden sm:block">
-            <VisitorCounter isVisible={showVisitorCounter} />
+            <SimpleVisitorCounter />
           </div>
 
           {/* User status badge — synced with SmartSuccess.AI */}
