@@ -247,10 +247,11 @@ async def call_gemini_api(prompt: str, system_prompt: str = "You are a helpful A
 
 
 OPENROUTER_FREE_MODELS = [
-    "meta-llama/llama-4-maverick:free",
-    "deepseek/deepseek-chat-v3-0324:free",
-    "google/gemma-3-27b-it:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
+    "openrouter/free",                        # OpenRouter smart router — auto-selects available free models
+    "arcee-ai/trinity-large-preview:free",     # 400B MoE model, currently active
+    "stepfun/step-3.5-flash:free",             # 196B MoE, 256K context
+    "z-ai/glm-4.5-air:free",                  # Lightweight MoE, 131K context
+    "meta-llama/llama-3.2-3b-instruct:free",   # Meta Llama confirmed free variant
 ]
 
 async def call_openrouter_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", model_index: int = 0) -> str:
