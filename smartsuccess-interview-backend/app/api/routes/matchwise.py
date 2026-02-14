@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 
 import aiohttp
 import stripe
-import PyPDF2
+import pdfplumber
 from docx import Document
 from bs4 import BeautifulSoup
 import requests
@@ -196,10 +196,12 @@ TOKEN_BUDGETS = {
 }
 
 # ============================================================================
-# Zero-Cost AI Fallback Architecture
-# Groq → Gemini → OpenRouter
+# AI Fallback Architecture
+# Layer 1: Groq (free, fast)  →  Layer 2: Gemini (free)  →  Layer 3: OpenAI GPT-4o-mini (paid, reliable)
+# Layer 4: OpenRouter (free, optional last resort)
 # ============================================================================
-async def call_groq_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", max_tokens: int = 2000) -> str:
+
+async def call_groq_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", max_tokens: int = 2000, json_mode: bool = False) -> str:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise Exception("GROQ_API_KEY not set")
@@ -215,6 +217,8 @@ async def call_groq_api(prompt: str, system_prompt: str = "You are a helpful AI 
             "max_tokens": max_tokens,
             "temperature": 0.2
         }
+        if json_mode:
+            data["response_format"] = {"type": "json_object"}
         try:
             async with session.post(
                 "https://api.groq.com/openai/v1/chat/completions",
@@ -232,7 +236,7 @@ async def call_groq_api(prompt: str, system_prompt: str = "You are a helpful AI 
             raise Exception(f"Groq API request failed: {str(e)}")
 
 
-async def call_gemini_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", max_tokens: int = 2000) -> str:
+async def call_gemini_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", max_tokens: int = 2000, json_mode: bool = False) -> str:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise Exception("GEMINI_API_KEY not set")
@@ -241,9 +245,12 @@ async def call_gemini_api(prompt: str, system_prompt: str = "You are a helpful A
 
     async with aiohttp.ClientSession() as session:
         headers = {"Content-Type": "application/json"}
+        gen_config = {"maxOutputTokens": max_tokens, "temperature": 0.2}
+        if json_mode:
+            gen_config["responseMimeType"] = "application/json"
         data = {
             "contents": [{"parts": [{"text": f"{system_prompt}\n\n{prompt}"}]}],
-            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.2}
+            "generationConfig": gen_config
         }
         try:
             async with session.post(url, headers=headers, json=data, timeout=aiohttp.ClientTimeout(total=30)) as response:
@@ -258,6 +265,45 @@ async def call_gemini_api(prompt: str, system_prompt: str = "You are a helpful A
             raise Exception(f"Gemini API request failed: {str(e)}")
 
 
+async def call_openai_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", max_tokens: int = 2000, json_mode: bool = False) -> str:
+    """OpenAI GPT-4o-mini — reliable paid fallback (~$0.15/1M input, $0.60/1M output).
+    Only triggered when both Groq and Gemini fail (~5% of requests). Cost: ~$0.25/month.
+    """
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise Exception("OPENAI_API_KEY not set")
+
+    async with aiohttp.ClientSession() as session:
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        data = {
+            "model": "gpt-4o-mini",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": max_tokens,
+            "temperature": 0.2
+        }
+        if json_mode:
+            data["response_format"] = {"type": "json_object"}
+        try:
+            async with session.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers, json=data,
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as response:
+                if response.status == 429:
+                    raise Exception(f"OpenAI rate limit exceeded (429)")
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"OpenAI API error: {response.status} - {error_text}")
+                result = await response.json()
+                return result["choices"][0]["message"]["content"]
+        except aiohttp.ClientError as e:
+            raise Exception(f"OpenAI API request failed: {str(e)}")
+
+
+# OpenRouter kept as optional Layer 4 (free, less reliable)
 OPENROUTER_FREE_MODELS = [
     "openrouter/free",                        # OpenRouter smart router — auto-selects available free models
     "arcee-ai/trinity-large-preview:free",     # 400B MoE model, currently active
@@ -310,37 +356,46 @@ async def call_openrouter_api(prompt: str, system_prompt: str = "You are a helpf
             raise Exception(f"OpenRouter API request failed ({model}): {str(e)}")
 
 
-async def call_ai_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", max_tokens: int = 2000) -> str:
-    """Zero-Cost Triple Fallback: Groq → Gemini → OpenRouter
+async def call_ai_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", max_tokens: int = 2000, json_mode: bool = False) -> str:
+    """4-Layer Fallback: Groq → Gemini → OpenAI GPT-4o-mini → OpenRouter (free)
     
     Args:
         prompt: The user prompt to send
         system_prompt: System-level instruction for the LLM
         max_tokens: Per-prompt token budget (varies by output type)
+        json_mode: If True, request structured JSON output from the LLM
     """
     try:
-        print(f"🔵 [Matchwise] AI Layer 1: Attempting Groq (max_tokens={max_tokens})...")
-        result = await call_groq_api(prompt, system_prompt, max_tokens)
+        print(f"🔵 [Matchwise] AI Layer 1: Attempting Groq (max_tokens={max_tokens}, json={json_mode})...")
+        result = await call_groq_api(prompt, system_prompt, max_tokens, json_mode)
         print("✅ [Matchwise] AI Layer 1 SUCCESS: Groq")
         return result
     except Exception as groq_error:
         print(f"⚠️ [Matchwise] AI Layer 1 FAILED (Groq): {groq_error}")
 
     try:
-        print(f"🟡 [Matchwise] AI Layer 2: Attempting Gemini (max_tokens={max_tokens})...")
-        result = await call_gemini_api(prompt, system_prompt, max_tokens)
+        print(f"🟡 [Matchwise] AI Layer 2: Attempting Gemini (max_tokens={max_tokens}, json={json_mode})...")
+        result = await call_gemini_api(prompt, system_prompt, max_tokens, json_mode)
         print("✅ [Matchwise] AI Layer 2 SUCCESS: Gemini")
         return result
     except Exception as gemini_error:
         print(f"⚠️ [Matchwise] AI Layer 2 FAILED (Gemini): {gemini_error}")
 
     try:
-        print(f"🟠 [Matchwise] AI Layer 3: Attempting OpenRouter (max_tokens={max_tokens})...")
+        print(f"🟣 [Matchwise] AI Layer 3: Attempting OpenAI GPT-4o-mini (max_tokens={max_tokens}, json={json_mode})...")
+        result = await call_openai_api(prompt, system_prompt, max_tokens, json_mode)
+        print("✅ [Matchwise] AI Layer 3 SUCCESS: OpenAI GPT-4o-mini")
+        return result
+    except Exception as openai_error:
+        print(f"⚠️ [Matchwise] AI Layer 3 FAILED (OpenAI): {openai_error}")
+
+    try:
+        print(f"🟠 [Matchwise] AI Layer 4: Attempting OpenRouter (max_tokens={max_tokens})...")
         result = await call_openrouter_api(prompt, system_prompt, max_tokens)
-        print("✅ [Matchwise] AI Layer 3 SUCCESS: OpenRouter")
+        print("✅ [Matchwise] AI Layer 4 SUCCESS: OpenRouter")
         return result
     except Exception as openrouter_error:
-        print(f"❌ [Matchwise] AI Layer 3 FAILED (OpenRouter): {openrouter_error}")
+        print(f"❌ [Matchwise] AI Layer 4 FAILED (OpenRouter): {openrouter_error}")
 
     raise Exception("All AI services are currently unavailable. Please try again in a few minutes.")
 
@@ -349,12 +404,15 @@ async def call_ai_api(prompt: str, system_prompt: str = "You are a helpful AI as
 # File Extraction Utilities
 # ============================================================================
 def extract_text_from_pdf(file: UploadFile) -> str:
+    """Extract text from PDF using pdfplumber (preserves multi-column layouts)."""
     try:
         content = file.file.read()
-        pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
         text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text() or ""
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text(layout=True)
+                if page_text:
+                    text += page_text + "\n"
         return text.strip()
     except Exception as e:
         raise Exception(f"Failed to extract PDF text: {str(e)}")
@@ -372,6 +430,99 @@ def extract_text_from_docx(file: UploadFile) -> str:
 
 
 # ============================================================================
+# Comparison Table — JSON validation + server-side rendering
+# ============================================================================
+STATUS_CONFIG = {
+    "Strong":   {"emoji": "✅", "weight": 1.0,  "color": "#dcfce7"},
+    "Moderate": {"emoji": "🔷", "weight": 0.8,  "color": "#dbeafe"},
+    "Partial":  {"emoji": "⚠️", "weight": 0.5,  "color": "#fef9c3"},
+    "Lack":     {"emoji": "❌", "weight": 0.1,  "color": "#fee2e2"},
+}
+
+
+def validate_comparison_json(raw: str) -> list:
+    """Parse and validate LLM comparison JSON output. Returns list of row dicts."""
+    # Strip markdown code fences if present
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        # Attempt to extract JSON object from surrounding text
+        match = re.search(r'\{[\s\S]*"rows"[\s\S]*\}', cleaned)
+        if match:
+            parsed = json.loads(match.group())
+        else:
+            print(f"⚠️ [Matchwise] Failed to parse comparison JSON, using fallback")
+            return []
+
+    rows = parsed.get("rows", []) if isinstance(parsed, dict) else parsed
+    validated = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        category = str(row.get("category", "Unknown"))
+        status = str(row.get("status", "Lack"))
+        comment = str(row.get("comment", ""))
+        # Normalize status to known values
+        if status not in STATUS_CONFIG:
+            status_lower = status.lower()
+            if "strong" in status_lower and "moderate" not in status_lower:
+                status = "Strong"
+            elif "moderate" in status_lower:
+                status = "Moderate"
+            elif "partial" in status_lower:
+                status = "Partial"
+            else:
+                status = "Lack"
+        validated.append({"category": category, "status": status, "comment": comment})
+    return validated
+
+
+def render_comparison_table(rows: list) -> str:
+    """Deterministically generate HTML comparison table from validated data."""
+    if not rows:
+        return "<p>Comparison data unavailable.</p>"
+
+    html = (
+        '<table style="width:100%;border-collapse:collapse;font-size:14px;line-height:1.6;">'
+        '<thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">'
+        '<th style="padding:10px 12px;text-align:left;font-weight:600;">Category</th>'
+        '<th style="padding:10px 12px;text-align:center;font-weight:600;">Match Status</th>'
+        '<th style="padding:10px 12px;text-align:left;font-weight:600;">Comments</th>'
+        '<th style="padding:10px 12px;text-align:center;font-weight:600;">Weight</th>'
+        '</tr></thead><tbody>'
+    )
+
+    for row in rows:
+        cfg = STATUS_CONFIG.get(row["status"], STATUS_CONFIG["Lack"])
+        html += (
+            f'<tr style="border-bottom:1px solid #e2e8f0;background:{cfg["color"]}20;">'
+            f'<td style="padding:8px 12px;">{row["category"]}</td>'
+            f'<td style="padding:8px 12px;text-align:center;">{cfg["emoji"]} {row["status"]}</td>'
+            f'<td style="padding:8px 12px;color:#4a5568;">{row["comment"]}</td>'
+            f'<td style="padding:8px 12px;text-align:center;font-weight:600;">{cfg["weight"]}</td>'
+            f'</tr>'
+        )
+
+    html += '</tbody></table>'
+    return html
+
+
+def calculate_match_score(rows: list) -> float:
+    """Calculate match score as percentage from comparison rows. Pure math, no LLM."""
+    if not rows:
+        return 0.0
+    total_weight = sum(STATUS_CONFIG.get(r["status"], STATUS_CONFIG["Lack"])["weight"] for r in rows)
+    count = len(rows)
+    score = (total_weight / count) * 100
+    return round(score, 2)
+
+
+# ============================================================================
 # Core Analysis — compare_texts (6 AI prompts)
 # ============================================================================
 async def compare_texts(job_text: str, resume_text: str) -> dict:
@@ -385,54 +536,83 @@ async def compare_texts(job_text: str, resume_text: str) -> dict:
         job_summary = await call_ai_api(job_summary_prompt, max_tokens=TOKEN_BUDGETS["job_summary"])
         job_summary = f"\n\n {job_summary}"
 
-        # b. Resume Summary with Comparison Table
-        resume_summary_prompt = (
-            "Read the following resume content:\n\n"
+        # b. Resume vs Job Comparison — JSON mode + server-side table rendering
+        comparison_prompt = (
+            "Compare the following resume against the job requirements.\n\n"
+            "RESUME:\n"
             f"{resume_text}\n\n"
-            "And the following job summary:\n\n"
+            "JOB REQUIREMENTS (summarized):\n"
             f"{job_summary}\n\n"
-            "Output a comparison table between the job_summary and the upload user resume. List in the table format with Four columns: Categories (list all the key requirements regarding position responsibilities, technical and soft skills, certifications, and educations from the job requirements, each key requirement in one line), Match Status (four status will be used: ✅ Strong (the item is also mentioned in the user's resume and very well-matched with what mentioned in job_summary_prompt) / 🔷 Moderate-strong (the item is also mentioned in the user's resume and closely matched with what mentioned in job_summary_prompt)/⚠️ Partial (the item is kind of mentioned in the user's resume and some parts matched with what mentioned in job_summary_prompt)/ ❌ Lack (the item is not clearly mentioned in the user's resume and only little bit or not match with what mentioned in job_summary_prompt)), Comments (very precise comment on how the user's experiences matches with the job requirement), and Match Weight (If the Match Status is Strong, assign number 1; If the Match Status is Moderate-Strong, assign number 0.8; If the Match Status is Partial, assign number 0.5; If the Match Status is Lack, assign number 0.1). Make sure to output the table in HTML format, with <table>, <tr>, <th>, <td> tags, and do not add any explanation or extra text. The table should be styled to look clean and modern. Only output the table in HTML format, with <table>, <tr>, <th>, <td> tags, and do not add any explanation or extra text. The table should be styled to look clean and modern. Below the table, based on the Match Weight column from job_summary comparison table, calculates the percentage of the matching score. The calculation formulas are: Sum of total Match Weight numbers = sum of all numbers in the Match Weight column; Count of total Match Weight numbers = count of all numbers in the Match Weight column; Match Score (%) =(Sum of total Match Weight numbers)/(Count of total Match Weight numbers). Return the final calculation results of Sum of total Match Weight numbers, Count of total Match Weight numbers, and Match Score as the final percentage number, rounded to two decimal places. No extra text, do not show ``` symbols or word html in output. "
+            "For each key requirement in the job posting (responsibilities, technical skills, "
+            "soft skills, certifications, education), evaluate how well the resume matches.\n\n"
+            "Return a JSON object with this EXACT structure:\n"
+            '{\n'
+            '  "rows": [\n'
+            '    {\n'
+            '      "category": "requirement name",\n'
+            '      "status": "Strong" | "Moderate" | "Partial" | "Lack",\n'
+            '      "comment": "brief explanation of how the resume matches or gaps"\n'
+            '    }\n'
+            '  ]\n'
+            '}\n\n'
+            "RULES:\n"
+            "- 'Strong': skill/experience clearly present and well-matched\n"
+            "- 'Moderate': skill/experience present but not a perfect match\n"
+            "- 'Partial': somewhat related experience exists\n"
+            "- 'Lack': not mentioned or very weak match\n"
+            "- List 10-20 key requirements. Each row must have all 3 fields.\n"
+            "- ONLY output valid JSON. No markdown, no extra text.\n"
         )
-        resume_summary = await call_ai_api(resume_summary_prompt, max_tokens=TOKEN_BUDGETS["comparison"])
-        resume_summary = f"\n\n{resume_summary}"
+        comparison_raw = await call_ai_api(comparison_prompt, max_tokens=TOKEN_BUDGETS["comparison"], json_mode=True)
 
-        # Match Score extraction
-        lines = resume_summary.strip().splitlines()
-        if lines:
-            last_line = lines[-1].strip()
-            match = re.search(r"([0-9]+(?:\.[0-9]+)?)", last_line)
-            if match:
-                match_score_test = float(match.group(1))
-                if match_score_test <= 1:
-                    match_score_test = round(match_score_test * 100, 2)
-            else:
-                match_score_test = last_line
-        else:
-            match_score_test = None
+        # Parse JSON and generate table + score server-side
+        comparison_data = validate_comparison_json(comparison_raw)
+        resume_summary = render_comparison_table(comparison_data)
+        match_score = calculate_match_score(comparison_data)
 
-        try:
-            match_score = float(str(match_score_test).strip().replace("%", ""))
-        except Exception:
-            match_score = match_score_test
-
-        # c. Tailored Resume Summary
+        # c. Tailored Resume Summary (with anti-hallucination guardrails)
         tailored_resume_summary_prompt = (
-            "Read the following resume content:\n\n"
+            "You are revising a resume summary to better match a specific job posting.\n\n"
+            "THE APPLICANT'S ACTUAL RESUME:\n"
             f"{resume_text}\n\n"
-            "And the following job content:\n\n"
+            "THE JOB POSTING:\n"
             f"{job_text}\n\n"
-            "Provide a revised one-paragraph summary based on the original summary in resume_text (the user's resume). If the user's resume does not have a summary or highlight section, write a new summary as the revised summary. Make sure this summary highlights the user's key skills and work experiences and makes it more closely match the job requirements in job_text. Please limit the overall summary to 1700 characters. The output should be in HTML format and should maintain a simple, modern style. Write this paragraph in the first person. Maintain 1.2 line spacing. Do not show the word ```html in output."
+            "TASK: Write a revised one-paragraph professional summary (max 1700 characters).\n\n"
+            "STRICT RULES:\n"
+            "1. ONLY mention skills, technologies, and experiences that ACTUALLY appear in the resume above.\n"
+            "2. DO NOT fabricate or invent any certifications, years of experience, tools, or achievements.\n"
+            "3. If the applicant lacks a required skill, frame adjacent experience as transferable "
+            "(e.g., 'Leveraging my background in X to quickly adapt to Y').\n"
+            "4. If the resume already has a summary section, use it as a base and enhance it.\n"
+            "5. If the resume does not have a summary, write a new one based solely on actual resume content.\n"
+            "6. Highlight the applicant's key skills and experiences that best match the job requirements.\n"
+            "7. Write in the first person.\n"
+            "8. Output in HTML format using <p> tags. No markdown, no ```html.\n"
+            "9. Maintain 1.2 line spacing.\n"
         )
         tailored_resume_summary = await call_ai_api(tailored_resume_summary_prompt, max_tokens=TOKEN_BUDGETS["resume_summary"])
         tailored_resume_summary = f"\n{tailored_resume_summary}"
 
-        # d. Tailored Work Experience
+        # d. Tailored Work Experience (with anti-hallucination guardrails)
         tailored_work_experience_prompt = (
-            "Read the following resume content:\n\n"
+            "You are revising work experience bullet points to better match a specific job posting.\n\n"
+            "THE APPLICANT'S ACTUAL RESUME:\n"
             f"{resume_text}\n\n"
-            "And the following job content:\n\n"
+            "THE JOB POSTING:\n"
             f"{job_text}\n\n"
-            "Find the latest work experiences from the resume and modify them to better match the job requirements. Format the output as a clean HTML unordered list with no more than 7 bullet points:              <ul>             <li>     Ø  [revised work experience bullet 1]</li>             <li>     Ø  [revised work experience bullet 2]</li>             <li>     Ø  [revised work experience bullet 3]</li>             <li>     Ø  [revised work experience bullet 4]</li>             <li>     Ø  [revised work experience bullet 5]</li>             <li>     Ø  [revised work experience bullet 6]</li>             <li>     Ø  [revised work experience bullet 7]</li>             </ul>             Please provide the actual revised work experience content. Organize the output into a clean HTML bullet list using the structure above. Return the result wrapped inside triple backticks and identify the language as HTML. Focus on the most recent and relevant experiences that align with the job requirements. Keep each bullet point concise and impactful. Make sure there are line breaks between each paragraph. Ensure the output uses proper HTML bullet list formatting. Maintain 1.2 line spacing.  Do not show the word ```html in output."
+            "TASK: Find the most recent and relevant work experiences from the resume and revise them "
+            "to better align with the job requirements. Output 5-7 bullet points.\n\n"
+            "STRICT RULES:\n"
+            "1. ONLY use work experiences that ACTUALLY appear in the resume. DO NOT invent new experiences.\n"
+            "2. You may rephrase, reorganize, and emphasize existing experiences to highlight relevant skills.\n"
+            "3. You may add relevant keywords from the job posting IF the applicant demonstrably has that skill "
+            "(e.g., if the resume shows Python projects, you can mention 'Python' even if not explicitly stated).\n"
+            "4. DO NOT fabricate metrics, percentages, dollar amounts, or team sizes unless they appear in the resume.\n"
+            "5. Frame transferable skills honestly (e.g., 'Applied data analysis techniques' rather than inventing a role).\n"
+            "6. Each bullet should start with a strong action verb.\n"
+            "7. Keep each bullet concise and impactful (1-2 sentences max).\n"
+            "8. Format as an HTML unordered list: <ul><li>...</li></ul>\n"
+            "9. No markdown, no ```html, no extra text outside the list.\n"
         )
         tailored_work_experience_html = await call_ai_api(tailored_work_experience_prompt, max_tokens=TOKEN_BUDGETS["work_experience"])
 
@@ -480,7 +660,7 @@ async def matchwise_health():
         "status": "ok",
         "module": "matchwise",
         "version": "2.0.0",
-        "ai_architecture": "groq-gemini-openrouter",
+        "ai_architecture": "groq-gemini-openai-openrouter",
         "firebase": "connected" if _get_matchwise_db() else "unavailable"
     }
 
