@@ -198,9 +198,71 @@ TOKEN_BUDGETS = {
 }
 
 # ============================================================================
+# Model-Specific System Prompts
+# Different output types benefit from different role framing & constraints
+# ============================================================================
+PROMPT_CONFIGS = {
+    "job_summary": {
+        "system_prompt": (
+            "You are a job posting analyst. Extract structured information accurately "
+            "from job descriptions. Focus on identifying key requirements, responsibilities, "
+            "and qualifications. Output clean, well-organized HTML."
+        ),
+    },
+    "comparison": {
+        "system_prompt": (
+            "You are a resume-to-job matching analyst. Compare resumes against job requirements "
+            "with precision. Return ONLY valid JSON. Be objective and evidence-based in your "
+            "assessments. Never output markdown, HTML, or extra text — only raw JSON."
+        ),
+    },
+    "resume_summary": {
+        "system_prompt": (
+            "You are a professional resume writer. Write honest, accurate summaries that "
+            "highlight real qualifications. Never fabricate experience. Frame transferable "
+            "skills truthfully. Write in first person."
+        ),
+    },
+    "work_experience": {
+        "system_prompt": (
+            "You are a career coach specializing in resume optimization. Reframe real work "
+            "experiences to highlight relevance to specific job postings. Never invent "
+            "experiences or fabricate metrics. Use strong action verbs."
+        ),
+    },
+    "cover_letter": {
+        "system_prompt": (
+            "You are a professional cover letter writer. Write compelling, honest, and "
+            "well-structured letters. Always address to 'Dear Hiring Manager' — never use "
+            "names from job postings. Only reference real experience from the resume."
+        ),
+    },
+}
+
+# ============================================================================
+# Privacy-Aware Data Handling
+# Redact PII before sending to free-tier (less trusted) AI providers
+# ============================================================================
+_PII_PATTERNS = [
+    (re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'), '[EMAIL_REDACTED]'),
+    (re.compile(r'(\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}'), '[PHONE_REDACTED]'),
+    (re.compile(r'\b\d{3}[-.\s]?\d{2}[-.\s]?\d{4}\b'), '[SSN_REDACTED]'),
+]
+
+def redact_pii(text: str) -> str:
+    """Strip common PII patterns (email, phone, SSN) from text.
+    Used before sending data to free-tier AI providers with weaker privacy guarantees.
+    """
+    result = text
+    for pattern, replacement in _PII_PATTERNS:
+        result = pattern.sub(replacement, result)
+    return result
+
+
+# ============================================================================
 # AI Fallback Architecture
 # Layer 1: Groq (free, fast)  →  Layer 2: Gemini (free)  →  Layer 3: OpenAI GPT-4o-mini (paid, reliable)
-# Layer 4: OpenRouter (free, optional last resort)
+# Layer 4: OpenRouter (free, optional last resort — PII redacted)
 # ============================================================================
 
 async def call_groq_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", max_tokens: int = 2000, json_mode: bool = False) -> str:
@@ -371,11 +433,13 @@ async def call_ai_api(
         (result_text, provider_name) tuple for tracking which provider served each prompt.
     """
     label = f"[{call_label}] " if call_label else ""
+    # OpenRouter (Layer 4) uses PII-redacted prompt — free-tier has weaker privacy guarantees
+    redacted_prompt = redact_pii(prompt)
     layers = [
-        ("Groq",     "🔵", lambda: call_groq_api(prompt, system_prompt, max_tokens, json_mode)),
-        ("Gemini",   "🟡", lambda: call_gemini_api(prompt, system_prompt, max_tokens, json_mode)),
-        ("OpenAI",   "🟣", lambda: call_openai_api(prompt, system_prompt, max_tokens, json_mode)),
-        ("OpenRouter","🟠", lambda: call_openrouter_api(prompt, system_prompt, max_tokens)),
+        ("Groq",      "🔵", lambda: call_groq_api(prompt, system_prompt, max_tokens, json_mode)),
+        ("Gemini",    "🟡", lambda: call_gemini_api(prompt, system_prompt, max_tokens, json_mode)),
+        ("OpenAI",    "🟣", lambda: call_openai_api(prompt, system_prompt, max_tokens, json_mode)),
+        ("OpenRouter", "🟠", lambda: call_openrouter_api(redacted_prompt, system_prompt, max_tokens)),
     ]
 
     for i, (name, icon, fn) in enumerate(layers, 1):
@@ -523,6 +587,7 @@ async def call_ai_with_validation(
     max_tokens: int = 2500,
     call_label: str = "comparison",
     max_retries: int = 2,
+    system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.",
 ) -> tuple[list, str]:
     """Call AI API expecting JSON comparison output. Retry with error feedback if validation fails.
     
@@ -535,6 +600,7 @@ async def call_ai_with_validation(
     for attempt in range(1, max_retries + 2):  # 1 initial + max_retries correction attempts
         raw, provider = await call_ai_api(
             current_prompt,
+            system_prompt=system_prompt,
             max_tokens=max_tokens,
             json_mode=True,
             call_label=f"{call_label} (attempt {attempt})",
@@ -590,7 +656,10 @@ async def compare_texts(job_text: str, resume_text: str) -> dict:
 
     try:
         job_summary_raw, js_provider = await call_ai_api(
-            job_summary_prompt, max_tokens=TOKEN_BUDGETS["job_summary"], call_label="job_summary"
+            job_summary_prompt,
+            system_prompt=PROMPT_CONFIGS["job_summary"]["system_prompt"],
+            max_tokens=TOKEN_BUDGETS["job_summary"],
+            call_label="job_summary",
         )
         job_summary = f"\n\n {job_summary_raw}"
         providers_used["job_summary"] = js_provider
@@ -696,7 +765,10 @@ async def compare_texts(job_text: str, resume_text: str) -> dict:
     async def _run_comparison():
         """Comparison with retry-with-correction validation."""
         rows, provider = await call_ai_with_validation(
-            comparison_prompt, max_tokens=TOKEN_BUDGETS["comparison"], call_label="comparison"
+            comparison_prompt,
+            max_tokens=TOKEN_BUDGETS["comparison"],
+            call_label="comparison",
+            system_prompt=PROMPT_CONFIGS["comparison"]["system_prompt"],
         )
         table_html = render_comparison_table(rows)
         score = calculate_match_score(rows)
@@ -704,19 +776,28 @@ async def compare_texts(job_text: str, resume_text: str) -> dict:
 
     async def _run_resume_summary():
         result, provider = await call_ai_api(
-            tailored_resume_summary_prompt, max_tokens=TOKEN_BUDGETS["resume_summary"], call_label="resume_summary"
+            tailored_resume_summary_prompt,
+            system_prompt=PROMPT_CONFIGS["resume_summary"]["system_prompt"],
+            max_tokens=TOKEN_BUDGETS["resume_summary"],
+            call_label="resume_summary",
         )
         return result, provider
 
     async def _run_work_experience():
         result, provider = await call_ai_api(
-            tailored_work_experience_prompt, max_tokens=TOKEN_BUDGETS["work_experience"], call_label="work_experience"
+            tailored_work_experience_prompt,
+            system_prompt=PROMPT_CONFIGS["work_experience"]["system_prompt"],
+            max_tokens=TOKEN_BUDGETS["work_experience"],
+            call_label="work_experience",
         )
         return result, provider
 
     async def _run_cover_letter():
         result, provider = await call_ai_api(
-            cover_letter_prompt, max_tokens=TOKEN_BUDGETS["cover_letter"], call_label="cover_letter"
+            cover_letter_prompt,
+            system_prompt=PROMPT_CONFIGS["cover_letter"]["system_prompt"],
+            max_tokens=TOKEN_BUDGETS["cover_letter"],
+            call_label="cover_letter",
         )
         return result, provider
 
@@ -796,8 +877,9 @@ async def matchwise_health():
     return {
         "status": "ok",
         "module": "matchwise",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "ai_architecture": "groq-gemini-openai-openrouter",
+        "features": ["model_specific_prompts", "pii_redaction", "parallel_execution", "graceful_degradation"],
         "firebase": "connected" if _get_matchwise_db() else "unavailable"
     }
 

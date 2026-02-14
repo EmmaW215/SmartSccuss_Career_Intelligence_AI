@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { UploadCloud, FileText, Loader2, ChevronRight, ArrowLeft, CheckCircle, Crown, LogIn } from 'lucide-react';
+import { UploadCloud, FileText, Loader2, ChevronRight, ArrowLeft, CheckCircle, Crown, LogIn, Shield } from 'lucide-react';
 
 import ResultsDisplay from './components/ResultsDisplay';
 import { useParentMessage } from './hooks/useParentMessage';
@@ -314,6 +314,16 @@ const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
                 </>
               )}
             </button>
+
+            {/* Privacy Notice */}
+            <div className="flex items-start gap-2 text-xs text-gray-400 leading-relaxed">
+              <Shield className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-gray-400" />
+              <p>
+                Your data is processed securely by AI services. Personal identifiers are automatically 
+                redacted before reaching free-tier providers. We do not store your resume or job 
+                description after analysis completes.
+              </p>
+            </div>
           </form>
         </div>
 
