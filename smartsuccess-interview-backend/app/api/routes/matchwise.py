@@ -19,6 +19,8 @@ import os
 import io
 import re
 import json
+import time
+import asyncio
 from datetime import datetime, timedelta
 
 import aiohttp
@@ -356,46 +358,37 @@ async def call_openrouter_api(prompt: str, system_prompt: str = "You are a helpf
             raise Exception(f"OpenRouter API request failed ({model}): {str(e)}")
 
 
-async def call_ai_api(prompt: str, system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.", max_tokens: int = 2000, json_mode: bool = False) -> str:
+async def call_ai_api(
+    prompt: str,
+    system_prompt: str = "You are a helpful AI assistant specializing in job application analysis.",
+    max_tokens: int = 2000,
+    json_mode: bool = False,
+    call_label: str = "",
+) -> tuple[str, str]:
     """4-Layer Fallback: Groq → Gemini → OpenAI GPT-4o-mini → OpenRouter (free)
     
-    Args:
-        prompt: The user prompt to send
-        system_prompt: System-level instruction for the LLM
-        max_tokens: Per-prompt token budget (varies by output type)
-        json_mode: If True, request structured JSON output from the LLM
+    Returns:
+        (result_text, provider_name) tuple for tracking which provider served each prompt.
     """
-    try:
-        print(f"🔵 [Matchwise] AI Layer 1: Attempting Groq (max_tokens={max_tokens}, json={json_mode})...")
-        result = await call_groq_api(prompt, system_prompt, max_tokens, json_mode)
-        print("✅ [Matchwise] AI Layer 1 SUCCESS: Groq")
-        return result
-    except Exception as groq_error:
-        print(f"⚠️ [Matchwise] AI Layer 1 FAILED (Groq): {groq_error}")
+    label = f"[{call_label}] " if call_label else ""
+    layers = [
+        ("Groq",     "🔵", lambda: call_groq_api(prompt, system_prompt, max_tokens, json_mode)),
+        ("Gemini",   "🟡", lambda: call_gemini_api(prompt, system_prompt, max_tokens, json_mode)),
+        ("OpenAI",   "🟣", lambda: call_openai_api(prompt, system_prompt, max_tokens, json_mode)),
+        ("OpenRouter","🟠", lambda: call_openrouter_api(prompt, system_prompt, max_tokens)),
+    ]
 
-    try:
-        print(f"🟡 [Matchwise] AI Layer 2: Attempting Gemini (max_tokens={max_tokens}, json={json_mode})...")
-        result = await call_gemini_api(prompt, system_prompt, max_tokens, json_mode)
-        print("✅ [Matchwise] AI Layer 2 SUCCESS: Gemini")
-        return result
-    except Exception as gemini_error:
-        print(f"⚠️ [Matchwise] AI Layer 2 FAILED (Gemini): {gemini_error}")
-
-    try:
-        print(f"🟣 [Matchwise] AI Layer 3: Attempting OpenAI GPT-4o-mini (max_tokens={max_tokens}, json={json_mode})...")
-        result = await call_openai_api(prompt, system_prompt, max_tokens, json_mode)
-        print("✅ [Matchwise] AI Layer 3 SUCCESS: OpenAI GPT-4o-mini")
-        return result
-    except Exception as openai_error:
-        print(f"⚠️ [Matchwise] AI Layer 3 FAILED (OpenAI): {openai_error}")
-
-    try:
-        print(f"🟠 [Matchwise] AI Layer 4: Attempting OpenRouter (max_tokens={max_tokens})...")
-        result = await call_openrouter_api(prompt, system_prompt, max_tokens)
-        print("✅ [Matchwise] AI Layer 4 SUCCESS: OpenRouter")
-        return result
-    except Exception as openrouter_error:
-        print(f"❌ [Matchwise] AI Layer 4 FAILED (OpenRouter): {openrouter_error}")
+    for i, (name, icon, fn) in enumerate(layers, 1):
+        try:
+            t0 = time.time()
+            print(f"{icon} [Matchwise] {label}Layer {i}: Attempting {name} (max_tokens={max_tokens}, json={json_mode})...")
+            result = await fn()
+            elapsed = round(time.time() - t0, 2)
+            print(f"✅ [Matchwise] {label}Layer {i} SUCCESS: {name} | {elapsed}s | {len(result)} chars")
+            return result, name
+        except Exception as err:
+            elapsed = round(time.time() - t0, 2)
+            print(f"⚠️ [Matchwise] {label}Layer {i} FAILED ({name}, {elapsed}s): {err}")
 
     raise Exception("All AI services are currently unavailable. Please try again in a few minutes.")
 
@@ -523,131 +516,275 @@ def calculate_match_score(rows: list) -> float:
 
 
 # ============================================================================
+# Retry-with-Correction: Validated JSON call for comparison table
+# ============================================================================
+async def call_ai_with_validation(
+    prompt: str,
+    max_tokens: int = 2500,
+    call_label: str = "comparison",
+    max_retries: int = 2,
+) -> tuple[list, str]:
+    """Call AI API expecting JSON comparison output. Retry with error feedback if validation fails.
+    
+    Returns:
+        (validated_rows, provider_name)
+    """
+    current_prompt = prompt
+    last_provider = "unknown"
+
+    for attempt in range(1, max_retries + 2):  # 1 initial + max_retries correction attempts
+        raw, provider = await call_ai_api(
+            current_prompt,
+            max_tokens=max_tokens,
+            json_mode=True,
+            call_label=f"{call_label} (attempt {attempt})",
+        )
+        last_provider = provider
+
+        rows = validate_comparison_json(raw)
+        if rows:
+            if attempt > 1:
+                print(f"✅ [Matchwise] {call_label} JSON validated on retry attempt {attempt}")
+            return rows, provider
+
+        if attempt <= max_retries:
+            # Append correction feedback to the prompt for the next attempt
+            correction = (
+                "\n\n--- CORRECTION REQUIRED ---\n"
+                "Your previous response could NOT be parsed as valid JSON.\n"
+                "Please output ONLY a valid JSON object with this exact structure:\n"
+                '{"rows": [{"category": "...", "status": "Strong|Moderate|Partial|Lack", "comment": "..."}]}\n'
+                "No markdown fences, no extra text. Just the raw JSON.\n"
+            )
+            current_prompt = prompt + correction
+            print(f"🔄 [Matchwise] {call_label} JSON validation failed, retrying with correction (attempt {attempt + 1})...")
+
+    # All retries exhausted — return empty (graceful degradation will handle it)
+    print(f"❌ [Matchwise] {call_label} JSON validation failed after {max_retries + 1} attempts")
+    return [], last_provider
+
+
+# ============================================================================
 # Core Analysis — compare_texts (6 AI prompts)
 # ============================================================================
 async def compare_texts(job_text: str, resume_text: str) -> dict:
+    """Run all 5 AI analysis prompts with parallel execution and graceful degradation.
+    
+    Architecture:
+      Step 1 (sequential): Job Summary — other prompts depend on it
+      Step 2 (parallel via asyncio.gather): Comparison + Resume Summary + Work Experience + Cover Letter
+      
+    Each prompt has independent error handling. A single failure returns a friendly
+    placeholder instead of crashing the entire analysis.
+    """
+    t_start = time.time()
+    warnings = []
+    providers_used = {}
+
+    # ── Step 1: Job Summary (sequential — other prompts depend on it) ──
+    job_summary_prompt = (
+        "Please read the following job posting content:\n\n"
+        f"{job_text}\n\n"
+        "Summarize the job descriptions by extracting and organizing the following information into a clean HTML bullet list format:             <ul>            <li><strong> Ø Position Title: </strong> [extract the job title]</li>            <li><strong> Ø Position Location: </strong> [extract the location]</li>            <li><strong> Ø Potential Salary: </strong> [extract salary information if available]</li>            <li><strong> Ø Job Responsibilities: </strong>            <ul>                  <li>•     Ø [responsibility 1]</li>                   <li>•     Ø [responsibility 2]</li>                   <li>•     Ø [responsibility 3]</li>                  <li>•     Ø [responsibility 4]</li> <li>•     Ø [responsibility 5]</li>  <li>•     Ø [responsibility 6]</li>    <li>•     Ø [responsibility 7]</li>   <li>•     Ø [responsibility 8]</li>      </ul>             </li>             <li><strong> Ø Technical Skills Required: </strong>               <ul>                 <li>•     Ø [tech skill 1]</li>                 <li>•     Ø [tech skill 2]</li>                 <li>•     Ø [tech skill 3]</li>                 <li>•     Ø [tech skill 4]</li>    <li>•     Ø [tech skill 5]</li>   <li>•     Ø [tech skill 6]</li>   <li>•     Ø [tech skill 7]</li>   <li>•     Ø [tech skill 8]</li>  </ul>             </li>             <li><strong> Ø Soft Skills Required: </strong>               <ul>                 <li>•     Ø [soft skill 1]</li>                 <li>•     Ø [soft skill 2]</li>                 <li>•     Ø [soft skill 3]</li>                 <li>•     Ø [soft skill 4]</li>   <li>•     Ø [soft skill 5]</li>  <li>•     Ø [soft skill 6]</li>  <li>•     Ø [soft skill 7]</li>           </ul>             </li>             <li><strong> Ø Certifications Required: </strong> [extract certification requirements]</li>             <li><strong> Ø Education Required: </strong> [extract education requirements]</li>             <li><strong> Ø Company Vision: </strong> [extract company vision/mission if available]</li>             </ul>\n            Please extract the actual information from the job posting. Using the structure above, organize the output into a clean HTML bullet list format. If any information is not available in the job posting, use 'Not specified' for that item. Ensure the output is clean, well-structured, and uses proper HTML bullet list formatting. Maintain 1.2 line spacing. Do not show the word ```html in output."
+    )
+
     try:
-        # a. Job Summary
-        job_summary_prompt = (
-            "Please read the following job posting content:\n\n"
-            f"{job_text}\n\n"
-            "Summarize the job descriptions by extracting and organizing the following information into a clean HTML bullet list format:             <ul>            <li><strong> Ø Position Title: </strong> [extract the job title]</li>            <li><strong> Ø Position Location: </strong> [extract the location]</li>            <li><strong> Ø Potential Salary: </strong> [extract salary information if available]</li>            <li><strong> Ø Job Responsibilities: </strong>            <ul>                  <li>•     Ø [responsibility 1]</li>                   <li>•     Ø [responsibility 2]</li>                   <li>•     Ø [responsibility 3]</li>                  <li>•     Ø [responsibility 4]</li> <li>•     Ø [responsibility 5]</li>  <li>•     Ø [responsibility 6]</li>    <li>•     Ø [responsibility 7]</li>   <li>•     Ø [responsibility 8]</li>      </ul>             </li>             <li><strong> Ø Technical Skills Required: </strong>               <ul>                 <li>•     Ø [tech skill 1]</li>                 <li>•     Ø [tech skill 2]</li>                 <li>•     Ø [tech skill 3]</li>                 <li>•     Ø [tech skill 4]</li>    <li>•     Ø [tech skill 5]</li>   <li>•     Ø [tech skill 6]</li>   <li>•     Ø [tech skill 7]</li>   <li>•     Ø [tech skill 8]</li>  </ul>             </li>             <li><strong> Ø Soft Skills Required: </strong>               <ul>                 <li>•     Ø [soft skill 1]</li>                 <li>•     Ø [soft skill 2]</li>                 <li>•     Ø [soft skill 3]</li>                 <li>•     Ø [soft skill 4]</li>   <li>•     Ø [soft skill 5]</li>  <li>•     Ø [soft skill 6]</li>  <li>•     Ø [soft skill 7]</li>           </ul>             </li>             <li><strong> Ø Certifications Required: </strong> [extract certification requirements]</li>             <li><strong> Ø Education Required: </strong> [extract education requirements]</li>             <li><strong> Ø Company Vision: </strong> [extract company vision/mission if available]</li>             </ul>\n            Please extract the actual information from the job posting. Using the structure above, organize the output into a clean HTML bullet list format. If any information is not available in the job posting, use 'Not specified' for that item. Ensure the output is clean, well-structured, and uses proper HTML bullet list formatting. Maintain 1.2 line spacing. Do not show the word ```html in output."
+        job_summary_raw, js_provider = await call_ai_api(
+            job_summary_prompt, max_tokens=TOKEN_BUDGETS["job_summary"], call_label="job_summary"
         )
-        job_summary = await call_ai_api(job_summary_prompt, max_tokens=TOKEN_BUDGETS["job_summary"])
-        job_summary = f"\n\n {job_summary}"
-
-        # b. Resume vs Job Comparison — JSON mode + server-side table rendering
-        comparison_prompt = (
-            "Compare the following resume against the job requirements.\n\n"
-            "RESUME:\n"
-            f"{resume_text}\n\n"
-            "JOB REQUIREMENTS (summarized):\n"
-            f"{job_summary}\n\n"
-            "For each key requirement in the job posting (responsibilities, technical skills, "
-            "soft skills, certifications, education), evaluate how well the resume matches.\n\n"
-            "Return a JSON object with this EXACT structure:\n"
-            '{\n'
-            '  "rows": [\n'
-            '    {\n'
-            '      "category": "requirement name",\n'
-            '      "status": "Strong" | "Moderate" | "Partial" | "Lack",\n'
-            '      "comment": "brief explanation of how the resume matches or gaps"\n'
-            '    }\n'
-            '  ]\n'
-            '}\n\n'
-            "RULES:\n"
-            "- 'Strong': skill/experience clearly present and well-matched\n"
-            "- 'Moderate': skill/experience present but not a perfect match\n"
-            "- 'Partial': somewhat related experience exists\n"
-            "- 'Lack': not mentioned or very weak match\n"
-            "- List 10-20 key requirements. Each row must have all 3 fields.\n"
-            "- ONLY output valid JSON. No markdown, no extra text.\n"
-        )
-        comparison_raw = await call_ai_api(comparison_prompt, max_tokens=TOKEN_BUDGETS["comparison"], json_mode=True)
-
-        # Parse JSON and generate table + score server-side
-        comparison_data = validate_comparison_json(comparison_raw)
-        resume_summary = render_comparison_table(comparison_data)
-        match_score = calculate_match_score(comparison_data)
-
-        # c. Tailored Resume Summary (with anti-hallucination guardrails)
-        tailored_resume_summary_prompt = (
-            "You are revising a resume summary to better match a specific job posting.\n\n"
-            "THE APPLICANT'S ACTUAL RESUME:\n"
-            f"{resume_text}\n\n"
-            "THE JOB POSTING:\n"
-            f"{job_text}\n\n"
-            "TASK: Write a revised one-paragraph professional summary (max 1700 characters).\n\n"
-            "STRICT RULES:\n"
-            "1. ONLY mention skills, technologies, and experiences that ACTUALLY appear in the resume above.\n"
-            "2. DO NOT fabricate or invent any certifications, years of experience, tools, or achievements.\n"
-            "3. If the applicant lacks a required skill, frame adjacent experience as transferable "
-            "(e.g., 'Leveraging my background in X to quickly adapt to Y').\n"
-            "4. If the resume already has a summary section, use it as a base and enhance it.\n"
-            "5. If the resume does not have a summary, write a new one based solely on actual resume content.\n"
-            "6. Highlight the applicant's key skills and experiences that best match the job requirements.\n"
-            "7. Write in the first person.\n"
-            "8. Output in HTML format using <p> tags. No markdown, no ```html.\n"
-            "9. Maintain 1.2 line spacing.\n"
-        )
-        tailored_resume_summary = await call_ai_api(tailored_resume_summary_prompt, max_tokens=TOKEN_BUDGETS["resume_summary"])
-        tailored_resume_summary = f"\n{tailored_resume_summary}"
-
-        # d. Tailored Work Experience (with anti-hallucination guardrails)
-        tailored_work_experience_prompt = (
-            "You are revising work experience bullet points to better match a specific job posting.\n\n"
-            "THE APPLICANT'S ACTUAL RESUME:\n"
-            f"{resume_text}\n\n"
-            "THE JOB POSTING:\n"
-            f"{job_text}\n\n"
-            "TASK: Find the most recent and relevant work experiences from the resume and revise them "
-            "to better align with the job requirements. Output 5-7 bullet points.\n\n"
-            "STRICT RULES:\n"
-            "1. ONLY use work experiences that ACTUALLY appear in the resume. DO NOT invent new experiences.\n"
-            "2. You may rephrase, reorganize, and emphasize existing experiences to highlight relevant skills.\n"
-            "3. You may add relevant keywords from the job posting IF the applicant demonstrably has that skill "
-            "(e.g., if the resume shows Python projects, you can mention 'Python' even if not explicitly stated).\n"
-            "4. DO NOT fabricate metrics, percentages, dollar amounts, or team sizes unless they appear in the resume.\n"
-            "5. Frame transferable skills honestly (e.g., 'Applied data analysis techniques' rather than inventing a role).\n"
-            "6. Each bullet should start with a strong action verb.\n"
-            "7. Keep each bullet concise and impactful (1-2 sentences max).\n"
-            "8. Format as an HTML unordered list: <ul><li>...</li></ul>\n"
-            "9. No markdown, no ```html, no extra text outside the list.\n"
-        )
-        tailored_work_experience_html = await call_ai_api(tailored_work_experience_prompt, max_tokens=TOKEN_BUDGETS["work_experience"])
-
-        # e. Cover Letter (with anti-hallucination guardrails)
-        cover_letter_prompt = (
-            "Write a professional cover letter for the following job application.\n\n"
-            "APPLICANT'S ACTUAL BACKGROUND (from resume):\n"
-            f"{resume_text}\n\n"
-            "JOB POSTING:\n"
-            f"{job_text}\n\n"
-            "STRICT RULES YOU MUST FOLLOW:\n"
-            "1. Start the letter with 'Dear Hiring Manager,' — do NOT use any person's name from the job posting or resume.\n"
-            "2. End the letter with 'Sincerely,' followed by a blank line for the applicant's signature (use '[Your Name]' as placeholder).\n"
-            "3. ONLY reference skills, technologies, and experiences that ACTUALLY appear in the resume above. Do NOT fabricate or invent any experience the applicant does not have.\n"
-            "4. If the applicant lacks a required skill, frame adjacent experience as transferable (e.g., 'My experience in X provides a strong foundation for Y').\n"
-            "5. Extract the correct job title and company name from the job posting and use them in the letter.\n"
-            "6. Write exactly 4 paragraphs: (a) opening hook with position and company, (b) relevant technical experience, (c) soft skills and cultural fit, (d) closing with enthusiasm and interview request.\n"
-            "7. Keep the letter between 400-600 words. The tone should be confident, honest, and professional.\n"
-            "8. Write in the first person.\n"
-            "9. Output ONLY in HTML format using <p> tags for paragraphs. No markdown, no ```html, no extra text outside the letter.\n"
-            "10. Make sure there are line breaks between each paragraph.\n"
-        )
-        cover_letter = await call_ai_api(cover_letter_prompt, max_tokens=TOKEN_BUDGETS["cover_letter"])
-        cover_letter = f"\n{cover_letter}"
-
-        return {
-            "job_summary": job_summary,
-            "resume_summary": resume_summary,
-            "match_score": match_score,
-            "tailored_resume_summary": tailored_resume_summary,
-            "tailored_work_experience": tailored_work_experience_html,
-            "cover_letter": cover_letter,
-        }
+        job_summary = f"\n\n {job_summary_raw}"
+        providers_used["job_summary"] = js_provider
     except Exception as e:
-        raise Exception(f"Comparison failed: {str(e)}")
+        # Job summary is critical — without it, comparison quality drops severely
+        raise Exception(f"Comparison failed: Job summary generation failed: {str(e)}")
+
+    # ── Step 2: Build prompts for parallel execution ──
+
+    # b. Comparison prompt (uses job_summary)
+    comparison_prompt = (
+        "Compare the following resume against the job requirements.\n\n"
+        "RESUME:\n"
+        f"{resume_text}\n\n"
+        "JOB REQUIREMENTS (summarized):\n"
+        f"{job_summary}\n\n"
+        "For each key requirement in the job posting (responsibilities, technical skills, "
+        "soft skills, certifications, education), evaluate how well the resume matches.\n\n"
+        "Return a JSON object with this EXACT structure:\n"
+        '{\n'
+        '  "rows": [\n'
+        '    {\n'
+        '      "category": "requirement name",\n'
+        '      "status": "Strong" | "Moderate" | "Partial" | "Lack",\n'
+        '      "comment": "brief explanation of how the resume matches or gaps"\n'
+        '    }\n'
+        '  ]\n'
+        '}\n\n'
+        "RULES:\n"
+        "- 'Strong': skill/experience clearly present and well-matched\n"
+        "- 'Moderate': skill/experience present but not a perfect match\n"
+        "- 'Partial': somewhat related experience exists\n"
+        "- 'Lack': not mentioned or very weak match\n"
+        "- List 10-20 key requirements. Each row must have all 3 fields.\n"
+        "- ONLY output valid JSON. No markdown, no extra text.\n"
+    )
+
+    # c. Tailored Resume Summary (with anti-hallucination guardrails)
+    tailored_resume_summary_prompt = (
+        "You are revising a resume summary to better match a specific job posting.\n\n"
+        "THE APPLICANT'S ACTUAL RESUME:\n"
+        f"{resume_text}\n\n"
+        "THE JOB POSTING:\n"
+        f"{job_text}\n\n"
+        "TASK: Write a revised one-paragraph professional summary (max 1700 characters).\n\n"
+        "STRICT RULES:\n"
+        "1. ONLY mention skills, technologies, and experiences that ACTUALLY appear in the resume above.\n"
+        "2. DO NOT fabricate or invent any certifications, years of experience, tools, or achievements.\n"
+        "3. If the applicant lacks a required skill, frame adjacent experience as transferable "
+        "(e.g., 'Leveraging my background in X to quickly adapt to Y').\n"
+        "4. If the resume already has a summary section, use it as a base and enhance it.\n"
+        "5. If the resume does not have a summary, write a new one based solely on actual resume content.\n"
+        "6. Highlight the applicant's key skills and experiences that best match the job requirements.\n"
+        "7. Write in the first person.\n"
+        "8. Output in HTML format using <p> tags. No markdown, no ```html.\n"
+        "9. Maintain 1.2 line spacing.\n"
+    )
+
+    # d. Tailored Work Experience (with anti-hallucination guardrails)
+    tailored_work_experience_prompt = (
+        "You are revising work experience bullet points to better match a specific job posting.\n\n"
+        "THE APPLICANT'S ACTUAL RESUME:\n"
+        f"{resume_text}\n\n"
+        "THE JOB POSTING:\n"
+        f"{job_text}\n\n"
+        "TASK: Find the most recent and relevant work experiences from the resume and revise them "
+        "to better align with the job requirements. Output 5-7 bullet points.\n\n"
+        "STRICT RULES:\n"
+        "1. ONLY use work experiences that ACTUALLY appear in the resume. DO NOT invent new experiences.\n"
+        "2. You may rephrase, reorganize, and emphasize existing experiences to highlight relevant skills.\n"
+        "3. You may add relevant keywords from the job posting IF the applicant demonstrably has that skill "
+        "(e.g., if the resume shows Python projects, you can mention 'Python' even if not explicitly stated).\n"
+        "4. DO NOT fabricate metrics, percentages, dollar amounts, or team sizes unless they appear in the resume.\n"
+        "5. Frame transferable skills honestly (e.g., 'Applied data analysis techniques' rather than inventing a role).\n"
+        "6. Each bullet should start with a strong action verb.\n"
+        "7. Keep each bullet concise and impactful (1-2 sentences max).\n"
+        "8. Format as an HTML unordered list: <ul><li>...</li></ul>\n"
+        "9. No markdown, no ```html, no extra text outside the list.\n"
+    )
+
+    # e. Cover Letter (with anti-hallucination guardrails)
+    cover_letter_prompt = (
+        "Write a professional cover letter for the following job application.\n\n"
+        "APPLICANT'S ACTUAL BACKGROUND (from resume):\n"
+        f"{resume_text}\n\n"
+        "JOB POSTING:\n"
+        f"{job_text}\n\n"
+        "STRICT RULES YOU MUST FOLLOW:\n"
+        "1. Start the letter with 'Dear Hiring Manager,' — do NOT use any person's name from the job posting or resume.\n"
+        "2. End the letter with 'Sincerely,' followed by a blank line for the applicant's signature (use '[Your Name]' as placeholder).\n"
+        "3. ONLY reference skills, technologies, and experiences that ACTUALLY appear in the resume above. Do NOT fabricate or invent any experience the applicant does not have.\n"
+        "4. If the applicant lacks a required skill, frame adjacent experience as transferable (e.g., 'My experience in X provides a strong foundation for Y').\n"
+        "5. Extract the correct job title and company name from the job posting and use them in the letter.\n"
+        "6. Write exactly 4 paragraphs: (a) opening hook with position and company, (b) relevant technical experience, (c) soft skills and cultural fit, (d) closing with enthusiasm and interview request.\n"
+        "7. Keep the letter between 400-600 words. The tone should be confident, honest, and professional.\n"
+        "8. Write in the first person.\n"
+        "9. Output ONLY in HTML format using <p> tags for paragraphs. No markdown, no ```html, no extra text outside the letter.\n"
+        "10. Make sure there are line breaks between each paragraph.\n"
+    )
+
+    # ── Step 2: Execute remaining 4 prompts in parallel via asyncio.gather ──
+
+    async def _run_comparison():
+        """Comparison with retry-with-correction validation."""
+        rows, provider = await call_ai_with_validation(
+            comparison_prompt, max_tokens=TOKEN_BUDGETS["comparison"], call_label="comparison"
+        )
+        table_html = render_comparison_table(rows)
+        score = calculate_match_score(rows)
+        return table_html, score, provider
+
+    async def _run_resume_summary():
+        result, provider = await call_ai_api(
+            tailored_resume_summary_prompt, max_tokens=TOKEN_BUDGETS["resume_summary"], call_label="resume_summary"
+        )
+        return result, provider
+
+    async def _run_work_experience():
+        result, provider = await call_ai_api(
+            tailored_work_experience_prompt, max_tokens=TOKEN_BUDGETS["work_experience"], call_label="work_experience"
+        )
+        return result, provider
+
+    async def _run_cover_letter():
+        result, provider = await call_ai_api(
+            cover_letter_prompt, max_tokens=TOKEN_BUDGETS["cover_letter"], call_label="cover_letter"
+        )
+        return result, provider
+
+    # Launch all 4 concurrently — each wrapped in independent error handling
+    tasks = await asyncio.gather(
+        _run_comparison(),
+        _run_resume_summary(),
+        _run_work_experience(),
+        _run_cover_letter(),
+        return_exceptions=True,
+    )
+
+    # ── Step 3: Unpack results with graceful degradation ──
+
+    # b. Comparison table
+    if isinstance(tasks[0], Exception):
+        warnings.append(f"Comparison table temporarily unavailable: {tasks[0]}")
+        resume_summary = "<p>Comparison table temporarily unavailable. Please try again.</p>"
+        match_score = 0.0
+        providers_used["comparison"] = "failed"
+    else:
+        resume_summary, match_score, cmp_provider = tasks[0]
+        providers_used["comparison"] = cmp_provider
+
+    # c. Tailored Resume Summary
+    if isinstance(tasks[1], Exception):
+        warnings.append(f"Resume summary temporarily unavailable: {tasks[1]}")
+        tailored_resume_summary = "<p>Tailored resume summary temporarily unavailable. Please try again.</p>"
+        providers_used["resume_summary"] = "failed"
+    else:
+        tailored_resume_summary, rs_provider = tasks[1]
+        providers_used["resume_summary"] = rs_provider
+
+    # d. Work Experience
+    if isinstance(tasks[2], Exception):
+        warnings.append(f"Work experience suggestions temporarily unavailable: {tasks[2]}")
+        tailored_work_experience_html = "<ul><li>Work experience suggestions temporarily unavailable. Please try again.</li></ul>"
+        providers_used["work_experience"] = "failed"
+    else:
+        tailored_work_experience_html, we_provider = tasks[2]
+        providers_used["work_experience"] = we_provider
+
+    # e. Cover Letter
+    if isinstance(tasks[3], Exception):
+        warnings.append(f"Cover letter temporarily unavailable: {tasks[3]}")
+        cover_letter = "<p>Cover letter temporarily unavailable. Please try again.</p>"
+        providers_used["cover_letter"] = "failed"
+    else:
+        cover_letter, cl_provider = tasks[3]
+        providers_used["cover_letter"] = cl_provider
+
+    total_time = round(time.time() - t_start, 2)
+    print(f"📊 [Matchwise] Analysis complete in {total_time}s | providers: {providers_used} | warnings: {len(warnings)}")
+
+    result = {
+        "job_summary": job_summary,
+        "resume_summary": resume_summary,
+        "match_score": match_score,
+        "tailored_resume_summary": tailored_resume_summary,
+        "tailored_work_experience": tailored_work_experience_html,
+        "cover_letter": cover_letter,
+        "providers_used": providers_used,
+        "total_time_seconds": total_time,
+    }
+    if warnings:
+        result["warnings"] = warnings
+
+    return result
 
 
 # ============================================================================
