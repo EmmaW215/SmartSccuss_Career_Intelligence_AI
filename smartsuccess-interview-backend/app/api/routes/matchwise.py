@@ -192,9 +192,9 @@ class MatchwiseUserStatus:
 TOKEN_BUDGETS = {
     "job_summary": 1500,
     "comparison": 2500,
-    "resume_summary": 800,
+    "resume_summary": 1000,     # Increased from 800 for safety margin
     "work_experience": 1500,
-    "cover_letter": 3000,   # Cover letters need significantly more tokens
+    "cover_letter": 4096,       # Increased from 3000 — prevents truncation even with thinking overhead
 }
 
 # ============================================================================
@@ -205,8 +205,9 @@ PROMPT_CONFIGS = {
     "job_summary": {
         "system_prompt": (
             "You are a job posting analyst. Extract structured information accurately "
-            "from job descriptions. Focus on identifying key requirements, responsibilities, "
-            "and qualifications. Output clean, well-organized HTML."
+            "from job descriptions. Output clean, well-organized HTML bullet lists "
+            "with professional formatting. Use <strong> tags for labels. "
+            "Do NOT use special symbols like Ø or decorative characters. Keep output clean and scannable."
         ),
     },
     "comparison": {
@@ -218,23 +219,29 @@ PROMPT_CONFIGS = {
     },
     "resume_summary": {
         "system_prompt": (
-            "You are a professional resume writer. Write honest, accurate summaries that "
-            "highlight real qualifications. Never fabricate experience. Frame transferable "
-            "skills truthfully. Write in first person."
+            "You are a professional resume writer following North American resume conventions. "
+            "Write in the 'implied first person' — NEVER use personal pronouns (I, my, me, we, our). "
+            "Start sentences with strong action verbs or descriptive phrases. "
+            "Write honest, accurate summaries that highlight real qualifications. "
+            "Never fabricate experience. Frame transferable skills truthfully."
         ),
     },
     "work_experience": {
         "system_prompt": (
-            "You are a career coach specializing in resume optimization. Reframe real work "
-            "experiences to highlight relevance to specific job postings. Never invent "
-            "experiences or fabricate metrics. Use strong action verbs."
+            "You are a career coach specializing in resume optimization. "
+            "Your job is to EXTRACT real work experiences from resumes and LIGHTLY REFRAME "
+            "them to highlight relevance to specific job postings. "
+            "NEVER invent new experiences. NEVER use personal pronouns (I, my, me, we). "
+            "Always start bullets with strong past-tense action verbs. "
+            "Output ONLY HTML <ul><li> lists with no extra text."
         ),
     },
     "cover_letter": {
         "system_prompt": (
             "You are a professional cover letter writer. Write compelling, honest, and "
-            "well-structured letters. Always address to 'Dear Hiring Manager' — never use "
-            "names from job postings. Only reference real experience from the resume."
+            "well-structured letters. ALWAYS start with 'Dear Hiring Manager,' — NEVER use "
+            "any person's name from job postings. ALWAYS end with 'Sincerely,' and '[Your Name]'. "
+            "Only reference real experience from the resume. Write exactly 4 paragraphs."
         ),
     },
 }
@@ -309,7 +316,15 @@ async def call_gemini_api(prompt: str, system_prompt: str = "You are a helpful A
 
     async with aiohttp.ClientSession() as session:
         headers = {"Content-Type": "application/json"}
-        gen_config = {"maxOutputTokens": max_tokens, "temperature": 0.2}
+        gen_config = {
+            "maxOutputTokens": max_tokens,
+            "temperature": 0.2,
+            # Disable thinking to prevent token budget theft.
+            # Gemini 2.5 Flash uses thinking tokens by default which consume
+            # maxOutputTokens silently (~50-65%), causing truncation on
+            # generation tasks (cover letters, summaries) that don't need CoT.
+            "thinkingConfig": {"thinkingBudget": 0},
+        }
         if json_mode:
             gen_config["responseMimeType"] = "application/json"
         data = {
@@ -649,9 +664,51 @@ async def compare_texts(job_text: str, resume_text: str) -> dict:
 
     # ── Step 1: Job Summary (sequential — other prompts depend on it) ──
     job_summary_prompt = (
-        "Please read the following job posting content:\n\n"
+        f"Analyze the following job posting and extract key information.\n\n"
+        f"═══ JOB POSTING CONTENT ═══\n"
         f"{job_text}\n\n"
-        "Summarize the job descriptions by extracting and organizing the following information into a clean HTML bullet list format:             <ul>            <li><strong> Ø Position Title: </strong> [extract the job title]</li>            <li><strong> Ø Position Location: </strong> [extract the location]</li>            <li><strong> Ø Potential Salary: </strong> [extract salary information if available]</li>            <li><strong> Ø Job Responsibilities: </strong>            <ul>                  <li>•     Ø [responsibility 1]</li>                   <li>•     Ø [responsibility 2]</li>                   <li>•     Ø [responsibility 3]</li>                  <li>•     Ø [responsibility 4]</li> <li>•     Ø [responsibility 5]</li>  <li>•     Ø [responsibility 6]</li>    <li>•     Ø [responsibility 7]</li>   <li>•     Ø [responsibility 8]</li>      </ul>             </li>             <li><strong> Ø Technical Skills Required: </strong>               <ul>                 <li>•     Ø [tech skill 1]</li>                 <li>•     Ø [tech skill 2]</li>                 <li>•     Ø [tech skill 3]</li>                 <li>•     Ø [tech skill 4]</li>    <li>•     Ø [tech skill 5]</li>   <li>•     Ø [tech skill 6]</li>   <li>•     Ø [tech skill 7]</li>   <li>•     Ø [tech skill 8]</li>  </ul>             </li>             <li><strong> Ø Soft Skills Required: </strong>               <ul>                 <li>•     Ø [soft skill 1]</li>                 <li>•     Ø [soft skill 2]</li>                 <li>•     Ø [soft skill 3]</li>                 <li>•     Ø [soft skill 4]</li>   <li>•     Ø [soft skill 5]</li>  <li>•     Ø [soft skill 6]</li>  <li>•     Ø [soft skill 7]</li>           </ul>             </li>             <li><strong> Ø Certifications Required: </strong> [extract certification requirements]</li>             <li><strong> Ø Education Required: </strong> [extract education requirements]</li>             <li><strong> Ø Company Vision: </strong> [extract company vision/mission if available]</li>             </ul>\n            Please extract the actual information from the job posting. Using the structure above, organize the output into a clean HTML bullet list format. If any information is not available in the job posting, use 'Not specified' for that item. Ensure the output is clean, well-structured, and uses proper HTML bullet list formatting. Maintain 1.2 line spacing. Do not show the word ```html in output."
+        f"═══ OUTPUT INSTRUCTIONS ═══\n"
+        "Extract and organize the information into a clean, professional HTML bullet list.\n"
+        "Use the EXACT structure below. Replace bracketed placeholders with actual content from the job posting.\n"
+        "If any information is not available, write 'Not specified' for that item.\n\n"
+        'Output ONLY the HTML below — no markdown, no ```html, no preamble:\n\n'
+        '<ul style="list-style-type: disc; padding-left: 20px; line-height: 1.8;">\n'
+        "  <li><strong>Position Title:</strong> [exact job title]</li>\n"
+        "  <li><strong>Company Name:</strong> [company name and any client info if mentioned]</li>\n"
+        "  <li><strong>Department:</strong> [department if mentioned, else 'Not specified']</li>\n"
+        "  <li><strong>Location:</strong> [location and work arrangement (remote/onsite/hybrid)]</li>\n"
+        "  <li><strong>Employment Type:</strong> [full-time/contract/etc., else 'Not specified']</li>\n"
+        "  <li><strong>Compensation:</strong>\n"
+        '    <ul style="list-style-type: circle; padding-left: 20px;">\n'
+        "      <li><strong>Salary/Rate:</strong> [salary info if available, else 'Not specified']</li>\n"
+        "      <li><strong>Benefits:</strong> [benefits if mentioned, else 'Not specified']</li>\n"
+        "    </ul>\n"
+        "  </li>\n"
+        "  <li><strong>Environment/Company Culture:</strong> [company culture/vision if available, else 'Not specified']</li>\n"
+        "  <li><strong>Key Responsibilities:</strong>\n"
+        '    <ul style="list-style-type: circle; padding-left: 20px;">\n'
+        "      <li>[responsibility 1]</li>\n"
+        "      <li>[responsibility 2]</li>\n"
+        "      <li>[up to 8 responsibilities]</li>\n"
+        "    </ul>\n"
+        "  </li>\n"
+        "  <li><strong>Technical Skills Required:</strong>\n"
+        '    <ul style="list-style-type: circle; padding-left: 20px;">\n'
+        "      <li>[tech skill 1]</li>\n"
+        "      <li>[tech skill 2]</li>\n"
+        "      <li>[up to 10 technical skills]</li>\n"
+        "    </ul>\n"
+        "  </li>\n"
+        "  <li><strong>Soft Skills Required:</strong>\n"
+        '    <ul style="list-style-type: circle; padding-left: 20px;">\n'
+        "      <li>[soft skill 1]</li>\n"
+        "      <li>[soft skill 2]</li>\n"
+        "      <li>[up to 7 soft skills]</li>\n"
+        "    </ul>\n"
+        "  </li>\n"
+        "  <li><strong>Certifications Required:</strong> [certifications if any, else 'Not specified']</li>\n"
+        "  <li><strong>Education Required:</strong> [education requirements, else 'Not specified']</li>\n"
+        "</ul>"
     )
 
     try:
@@ -697,67 +754,109 @@ async def compare_texts(job_text: str, resume_text: str) -> dict:
         "- ONLY output valid JSON. No markdown, no extra text.\n"
     )
 
-    # c. Tailored Resume Summary (with anti-hallucination guardrails)
+    # c. Tailored Resume Summary (implied first person — no pronouns)
     tailored_resume_summary_prompt = (
-        "You are revising a resume summary to better match a specific job posting.\n\n"
-        "THE APPLICANT'S ACTUAL RESUME:\n"
+        "You are revising a professional resume summary to better match a specific job posting.\n\n"
+        "═══ RESUME WRITING CONVENTION (CRITICAL) ═══\n"
+        "Use 'implied first person' — this is the standard North American resume format:\n"
+        "- NEVER use personal pronouns: I, my, me, we, our\n"
+        "- Start sentences with action verbs or descriptive noun phrases\n"
+        "- The subject 'I' is implied and never written\n"
+        "- Examples:\n"
+        '  CORRECT: "Senior AI Solution Architect with 14+ years of experience..."\n'
+        '  WRONG:   "I am a Senior AI Solution Architect with 14+ years..."\n'
+        '  CORRECT: "Proven track record in designing production-grade RAG pipelines..."\n'
+        '  WRONG:   "I have a proven track record in designing..."\n'
+        '  CORRECT: "Adept at leveraging cloud-native architectures to deliver scalable AI solutions."\n'
+        '  WRONG:   "I am adept at leveraging my cloud-native architecture skills..."\n\n'
+        "═══ CONTENT RULES ═══\n"
+        "1. Write ONE paragraph, maximum 150 words.\n"
+        "2. ONLY mention skills, technologies, and experiences that ACTUALLY appear in the resume below.\n"
+        "3. DO NOT fabricate or invent any certifications, years of experience, tools, or achievements.\n"
+        "4. If the applicant lacks a required skill, frame adjacent experience as transferable\n"
+        "   (e.g., 'Leveraging background in X to rapidly adapt to Y' — no 'I' or 'my').\n"
+        "5. If the resume has an existing summary section, use it as a base and enhance it.\n"
+        "6. If no summary exists, write a new one based solely on actual resume content.\n"
+        "7. Highlight key skills and experiences that best match the job requirements.\n"
+        "8. Output a single HTML <p> tag. No markdown, no ```html, no preamble text.\n\n"
+        "═══ APPLICANT'S ACTUAL RESUME ═══\n"
         f"{resume_text}\n\n"
-        "THE JOB POSTING:\n"
+        "═══ TARGET JOB POSTING ═══\n"
         f"{job_text}\n\n"
-        "TASK: Write a revised one-paragraph professional summary (max 1700 characters).\n\n"
-        "STRICT RULES:\n"
-        "1. ONLY mention skills, technologies, and experiences that ACTUALLY appear in the resume above.\n"
-        "2. DO NOT fabricate or invent any certifications, years of experience, tools, or achievements.\n"
-        "3. If the applicant lacks a required skill, frame adjacent experience as transferable "
-        "(e.g., 'Leveraging my background in X to quickly adapt to Y').\n"
-        "4. If the resume already has a summary section, use it as a base and enhance it.\n"
-        "5. If the resume does not have a summary, write a new one based solely on actual resume content.\n"
-        "6. Highlight the applicant's key skills and experiences that best match the job requirements.\n"
-        "7. Write in the first person.\n"
-        "8. Output in HTML format using <p> tags. No markdown, no ```html.\n"
-        "9. Maintain 1.2 line spacing.\n"
+        "Now write the revised summary following ALL conventions above. Do NOT use any personal pronouns."
     )
 
-    # d. Tailored Work Experience (with anti-hallucination guardrails)
+    # d. Tailored Work Experience (two-step: EXTRACT then REFRAME)
     tailored_work_experience_prompt = (
-        "You are revising work experience bullet points to better match a specific job posting.\n\n"
-        "THE APPLICANT'S ACTUAL RESUME:\n"
+        "You are a career coach helping reframe existing resume bullet points for a specific job application.\n\n"
+        "═══ RESUME WRITING CONVENTION (CRITICAL) ═══\n"
+        "Use 'implied first person' — standard North American resume format:\n"
+        "- NEVER use personal pronouns: I, my, me, we, our\n"
+        "- Start EVERY bullet with a strong past-tense action verb "
+        "(Led, Designed, Implemented, Engineered, Directed, Built, Optimized, Architected, Developed, Managed)\n"
+        "- The subject 'I' is implied and never written\n\n"
+        "═══ TASK: TWO-STEP PROCESS ═══\n\n"
+        "STEP 1 — EXTRACT: Identify the 5-7 most relevant work experience bullet points\n"
+        "from the resume that best align with the target job requirements.\n"
+        "Pick ACTUAL bullet points or descriptions from the resume's work history.\n\n"
+        "STEP 2 — REFRAME: For each extracted bullet, lightly reframe the wording to:\n"
+        "  - Highlight relevance to the target job\n"
+        "  - Add relevant keywords from the job posting ONLY IF the skill genuinely exists in the resume\n"
+        "  - Strengthen the action verb if needed\n"
+        "  - Preserve the original achievement, metric, or context\n\n"
+        "═══ STRICT RULES ═══\n"
+        "1. Every bullet MUST be traceable to a REAL experience in the resume. If you cannot point to the source, do not include it.\n"
+        "2. DO NOT invent projects, tools, technologies, metrics, team sizes, or dollar amounts that aren't in the resume.\n"
+        "3. DO NOT fully rewrite or create new experiences. ONLY reframe existing ones.\n"
+        "4. Each bullet: strong action verb + context + measurable result (if available in resume).\n"
+        "5. Keep each bullet to 1-2 concise sentences maximum.\n"
+        "6. Frame transferable skills honestly (e.g., 'Applied RF propagation modeling methodologies to...' rather than inventing a new role).\n\n"
+        "═══ OUTPUT FORMAT (CRITICAL — MUST FOLLOW EXACTLY) ═══\n"
+        "Output as an HTML unordered list. EVERY experience must be a <li> inside a <ul>.\n"
+        "Do NOT output plain text paragraphs. Do NOT output markdown.\n"
+        "Do NOT add any preamble, title, or explanation outside the list.\n"
+        "Output ONLY this structure:\n\n"
+        "<ul>\n"
+        "<li>Bullet point 1 here</li>\n"
+        "<li>Bullet point 2 here</li>\n"
+        "<li>Bullet point 3 here</li>\n"
+        "<li>Bullet point 4 here</li>\n"
+        "<li>Bullet point 5 here</li>\n"
+        "</ul>\n\n"
+        "═══ APPLICANT'S ACTUAL RESUME ═══\n"
         f"{resume_text}\n\n"
-        "THE JOB POSTING:\n"
+        "═══ TARGET JOB POSTING ═══\n"
         f"{job_text}\n\n"
-        "TASK: Find the most recent and relevant work experiences from the resume and revise them "
-        "to better align with the job requirements. Output 5-7 bullet points.\n\n"
-        "STRICT RULES:\n"
-        "1. ONLY use work experiences that ACTUALLY appear in the resume. DO NOT invent new experiences.\n"
-        "2. You may rephrase, reorganize, and emphasize existing experiences to highlight relevant skills.\n"
-        "3. You may add relevant keywords from the job posting IF the applicant demonstrably has that skill "
-        "(e.g., if the resume shows Python projects, you can mention 'Python' even if not explicitly stated).\n"
-        "4. DO NOT fabricate metrics, percentages, dollar amounts, or team sizes unless they appear in the resume.\n"
-        "5. Frame transferable skills honestly (e.g., 'Applied data analysis techniques' rather than inventing a role).\n"
-        "6. Each bullet should start with a strong action verb.\n"
-        "7. Keep each bullet concise and impactful (1-2 sentences max).\n"
-        "8. Format as an HTML unordered list: <ul><li>...</li></ul>\n"
-        "9. No markdown, no ```html, no extra text outside the list.\n"
+        "Now output ONLY the <ul>...</ul> list. No other text."
     )
 
-    # e. Cover Letter (with anti-hallucination guardrails)
+    # e. Cover Letter (rules-first structure to prevent "lost in the middle" attention decay)
     cover_letter_prompt = (
-        "Write a professional cover letter for the following job application.\n\n"
-        "APPLICANT'S ACTUAL BACKGROUND (from resume):\n"
+        "You are writing a professional cover letter. Follow ALL rules below EXACTLY.\n\n"
+        "═══ MANDATORY FORMAT RULES ═══\n"
+        "1. Start EXACTLY with 'Dear Hiring Manager,'\n"
+        "2. Write EXACTLY 4 paragraphs:\n"
+        "   - Paragraph 1: Opening hook — state the position title and company name, express enthusiasm\n"
+        "   - Paragraph 2: Relevant technical experience — highlight 3-4 specific skills/projects from the resume that match job requirements\n"
+        "   - Paragraph 3: Soft skills, leadership, and cultural fit\n"
+        "   - Paragraph 4: Closing — express enthusiasm for interview opportunity\n"
+        "3. End EXACTLY with:\n"
+        "   <p>Sincerely,</p>\n"
+        "   <p>[Your Name]</p>\n"
+        "4. Total length: 400-500 words (4 paragraphs)\n"
+        "5. Output ONLY in HTML using <p> tags. No markdown, no ```html.\n\n"
+        "═══ CONTENT INTEGRITY RULES ═══\n"
+        "6. ONLY reference skills, technologies, and experiences that ACTUALLY appear in the RESUME below.\n"
+        "7. DO NOT fabricate or invent any experience, certification, or achievement.\n"
+        "8. If the applicant lacks a required skill, frame adjacent experience as transferable\n"
+        "   (e.g., 'My experience in X provides a strong foundation for Y').\n"
+        "9. Extract the correct job title and company name from the JOB POSTING below.\n"
+        "10. Tone: confident, honest, professional. First person.\n\n"
+        "═══ RESUME (applicant's actual background) ═══\n"
         f"{resume_text}\n\n"
-        "JOB POSTING:\n"
+        "═══ JOB POSTING ═══\n"
         f"{job_text}\n\n"
-        "STRICT RULES YOU MUST FOLLOW:\n"
-        "1. Start the letter with 'Dear Hiring Manager,' — do NOT use any person's name from the job posting or resume.\n"
-        "2. End the letter with 'Sincerely,' followed by a blank line for the applicant's signature (use '[Your Name]' as placeholder).\n"
-        "3. ONLY reference skills, technologies, and experiences that ACTUALLY appear in the resume above. Do NOT fabricate or invent any experience the applicant does not have.\n"
-        "4. If the applicant lacks a required skill, frame adjacent experience as transferable (e.g., 'My experience in X provides a strong foundation for Y').\n"
-        "5. Extract the correct job title and company name from the job posting and use them in the letter.\n"
-        "6. Write exactly 4 paragraphs: (a) opening hook with position and company, (b) relevant technical experience, (c) soft skills and cultural fit, (d) closing with enthusiasm and interview request.\n"
-        "7. Keep the letter between 400-600 words. The tone should be confident, honest, and professional.\n"
-        "8. Write in the first person.\n"
-        "9. Output ONLY in HTML format using <p> tags for paragraphs. No markdown, no ```html, no extra text outside the letter.\n"
-        "10. Make sure there are line breaks between each paragraph.\n"
+        'Now write the cover letter following ALL rules above. Start with "Dear Hiring Manager,"'
     )
 
     # ── Step 2: Execute remaining 4 prompts in parallel via asyncio.gather ──
@@ -790,7 +889,16 @@ async def compare_texts(job_text: str, resume_text: str) -> dict:
             max_tokens=TOKEN_BUDGETS["work_experience"],
             call_label="work_experience",
         )
-        return result, provider
+        # HTML format enforcement — ensure proper <ul><li> structure
+        cleaned = re.sub(r'```html?\s*', '', result)
+        cleaned = re.sub(r'```\s*$', '', cleaned)
+        if '<ul' not in cleaned.lower():
+            # LLM output plain text instead of HTML list — wrap it
+            lines = [l.strip() for l in cleaned.split('\n') if l.strip()]
+            lines = [re.sub(r'^[\-\*\d\.•Ø]+\s*', '', l) for l in lines if l]
+            cleaned = '<ul>' + ''.join(f'<li>{l}</li>' for l in lines) + '</ul>'
+            print(f"⚠️ [Matchwise] Work experience output lacked <ul> — auto-wrapped. Provider: {provider}")
+        return cleaned, provider
 
     async def _run_cover_letter():
         result, provider = await call_ai_api(
@@ -799,6 +907,11 @@ async def compare_texts(job_text: str, resume_text: str) -> dict:
             max_tokens=TOKEN_BUDGETS["cover_letter"],
             call_label="cover_letter",
         )
+        # Truncation detection — a properly completed cover letter must end with signature
+        if "sincerely" not in result.lower():
+            print(f"⚠️ [Matchwise] Cover letter may be truncated (no 'Sincerely' found). "
+                  f"Provider: {provider}, output length: {len(result)} chars")
+            result += "\n<p>Sincerely,</p>\n<p>[Your Name]</p>"
         return result, provider
 
     # Launch all 4 concurrently — each wrapped in independent error handling
