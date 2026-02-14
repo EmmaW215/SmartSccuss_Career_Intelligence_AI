@@ -1,14 +1,11 @@
 import React, { useEffect, useState, useRef } from "react";
-import { onAuthStateChanged, User, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
-import { auth } from "./firebase";
-import { UploadCloud, FileText, Loader2, LogOut, ChevronRight, ArrowLeft } from 'lucide-react';
+import { UploadCloud, FileText, Loader2, ChevronRight, ArrowLeft, CheckCircle, Crown, LogIn } from 'lucide-react';
 
 import VisitorCounter from './components/VisitorCounter';
-import LoginModal from './components/LoginModal';
-import UpgradeModal from './components/UpgradeModal';
 import ResultsDisplay from './components/ResultsDisplay';
 import { useParentMessage } from './hooks/useParentMessage';
-import { ComparisonResponse, MatchwiseUserStatus } from './types';
+import { ComparisonResponse } from './types';
+import { useAuth } from '../../contexts/AuthContext';
 
 // Backend URL — points to SmartSuccess.AI backend's /api/matchwise prefix
 const BACKEND_URL = import.meta.env.VITE_MATCHWISE_BACKEND_URL 
@@ -24,6 +21,9 @@ interface MatchwiseAppProps {
 }
 
 const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
+  // SmartSuccess.AI auth — synced user status
+  const { isAuthenticated, isPro, user, triggerLogin, triggerUpgrade } = useAuth();
+
   const [jobText, setJobText] = useState('');
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [error, setError] = useState('');
@@ -31,119 +31,43 @@ const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<ComparisonResponse | null>(null);
   
-  // Modals
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [showLoginModal, setShowLoginModal] = useState(false);
-  const [loginMessage, setLoginMessage] = useState('');
-  
-  // User State
-  const [user, setUser] = useState<User | null>(null);
-  const [userStatus, setUserStatus] = useState<MatchwiseUserStatus | null>(null);
-  const [userStatusLoading, setUserStatusLoading] = useState(false);
-  const [anonymousTrialUsed, setAnonymousTrialUsed] = useState(false);
+  // Free trial tracking (local, per browser)
+  const [trialUsed, setTrialUsed] = useState(false);
   
   // UI State
   const [showVisitorCounter, setShowVisitorCounter] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize
+  // Initialize — check if free trial was already used
   useEffect(() => {
-    const trialUsed = localStorage.getItem('anonymousTrialUsed') === 'true';
-    setAnonymousTrialUsed(trialUsed);
-
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-    });
-    return () => unsubscribe();
+    const used = localStorage.getItem('matchwise_trial_used') === 'true';
+    setTrialUsed(used);
   }, []);
-
-  // Clear errors when user changes
-  useEffect(() => {
-    setError('');
-    setShowUpgradeModal(false);
-  }, [user]);
-
-  // Fetch User Status
-  useEffect(() => {
-    if (user) {
-      console.log('🔄 Loading user status for:', user.uid);
-      setUserStatusLoading(true);
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-      
-      fetch(`${MATCHWISE_API}/user/status?uid=${user.uid}`, { signal: controller.signal })
-        .then(res => res.json())
-        .then(data => {
-          if (data.error) {
-            console.error('❌ Error fetching user status:', data.error);
-            setUserStatus({
-              trialUsed: false,
-              isUpgraded: false,
-              planType: null,
-              scanLimit: null,
-              scansUsed: 0,
-              lastScanMonth: new Date().toISOString().slice(0, 7)
-            });
-          } else {
-            setUserStatus(data);
-          }
-        })
-        .catch((error) => {
-          console.error('❌ Failed to fetch user status:', error);
-          setUserStatus({
-            trialUsed: false,
-            isUpgraded: false,
-            planType: null,
-            scanLimit: null,
-            scansUsed: 0,
-            lastScanMonth: new Date().toISOString().slice(0, 7)
-          });
-        })
-        .finally(() => {
-          clearTimeout(timeoutId);
-          setUserStatusLoading(false);
-        });
-    } else {
-      setUserStatus(null);
-      setUserStatusLoading(false);
-    }
-  }, [user]);
 
   // Parent Window Communication
   useParentMessage({
-    showLoginModal: (message) => {
-      setShowLoginModal(true);
-      if (message) setLoginMessage(message);
+    showLoginModal: () => {
+      triggerLogin();
     },
     hideVisitorCounter: () => setShowVisitorCounter(false),
   });
 
   // Logic Helpers
   const canGenerate = () => {
-    if (!user) return !anonymousTrialUsed;
-    if (!userStatus) return true;
-    if (!userStatus.trialUsed) return true;
-    if (userStatus.isUpgraded) {
-      if (userStatus.scanLimit === null) return true;
-      return userStatus.scansUsed < userStatus.scanLimit;
-    }
+    // First free try: always allowed (regardless of login status)
+    if (!trialUsed) return true;
+    // After first try: must be Pro user
+    if (isPro) return true;
     return false;
   };
 
   const getErrorMessage = () => {
-    if (!user) {
-      if (anonymousTrialUsed) return 'Your free trial is finished. Please sign in and upgrade to continue!';
-      return '';
+    if (!trialUsed) return '';
+    if (isPro) return '';
+    if (!isAuthenticated) {
+      return 'Your free trial is finished. Please sign in and upgrade to Pro to continue!';
     }
-    if (!userStatus) return 'Loading user status...';
-    if (userStatus.trialUsed && !userStatus.isUpgraded) {
-      return 'Your free trial is finished. Please upgrade to continue using MatchWise!';
-    }
-    if (userStatus.isUpgraded && userStatus.scanLimit !== null && userStatus.scansUsed >= userStatus.scanLimit) {
-      return 'You have reached your monthly scan limit.';
-    }
-    return '';
+    return 'Your free trial is finished. Please upgrade to Pro to continue using MatchWise!';
   };
 
   // Handlers
@@ -192,7 +116,6 @@ const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
     const formData = new FormData();
     formData.append('job_text', jobText);
     formData.append('resume', resumeFile);
-    if (user) formData.append('uid', user.uid);
 
     setLoading(true);
     setError('');
@@ -212,15 +135,10 @@ const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
       const data = await apiResponse.json();
       setResponse(data);
 
-      // Update Local State
-      if (!user) {
-        localStorage.setItem('anonymousTrialUsed', 'true');
-        setAnonymousTrialUsed(true);
-      } else {
-        await fetch(`${MATCHWISE_API}/user/use-trial?uid=${user.uid}`, { method: "POST" });
-        const statusResponse = await fetch(`${MATCHWISE_API}/user/status?uid=${user.uid}`);
-        const statusData = await statusResponse.json();
-        if (!statusData.error) setUserStatus(statusData);
+      // Mark free trial as used after successful generation
+      if (!trialUsed) {
+        localStorage.setItem('matchwise_trial_used', 'true');
+        setTrialUsed(true);
       }
 
     } catch (err: unknown) {
@@ -231,40 +149,35 @@ const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
     }
   };
 
-  const handleAuth = async (action: 'login' | 'logout') => {
-    if (action === 'logout') {
-      await signOut(auth);
-      setResponse(null);
-      setJobText('');
-      setResumeFile(null);
-    } else {
-      try {
-        await signInWithPopup(auth, new GoogleAuthProvider());
-      } catch (e: any) {
-        alert("Login failed: " + e.message);
-      }
+  // User status badge — matches InterviewPage style
+  const getUserStatusBadge = () => {
+    if (!isAuthenticated) {
+      return (
+        <button
+          onClick={triggerLogin}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 font-semibold rounded-full shadow-md transition-all text-sm"
+        >
+          <LogIn className="w-4 h-4" />
+          Guest user Login/Sign up
+        </button>
+      );
     }
-  };
 
-  // Stripe Logic
-  const handleUpgrade = async (priceId: string, mode: 'payment' | 'subscription') => {
-    if (!user) {
-      setShowLoginModal(true);
-      setLoginMessage("Please sign in to upgrade your plan.");
-      return;
+    if (isPro) {
+      return (
+        <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-full shadow-md text-sm font-semibold">
+          <Crown className="w-4 h-4" />
+          Pro Connected
+        </div>
+      );
     }
-    try {
-      const res = await fetch(`${MATCHWISE_API}/create-checkout-session`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ uid: user.uid, price_id: priceId, mode })
-      });
-      const data = await res.json();
-      if (data.checkout_url) window.open(data.checkout_url, '_blank');
-      else alert('Failed to create checkout session');
-    } catch (e) {
-      alert('Error connecting to payment server');
-    }
+
+    return (
+      <div className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 border border-green-200 rounded-full text-sm font-semibold">
+        <CheckCircle className="w-4 h-4" />
+        User Connected
+      </div>
+    );
   };
 
   return (
@@ -296,39 +209,8 @@ const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
             <VisitorCounter isVisible={showVisitorCounter} />
           </div>
 
-          {!user ? (
-            <button
-              onClick={() => handleAuth('login')}
-              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-full shadow-md transition-all transform hover:scale-105"
-            >
-              Sign In
-            </button>
-          ) : (
-            <div className="flex items-center gap-4">
-              <div className="hidden md:flex flex-col items-end mr-2">
-                 <span className="text-sm font-semibold text-gray-800">{user.displayName}</span>
-                 {userStatus?.isUpgraded && (
-                    <span className="text-xs text-green-600 font-medium bg-green-50 px-2 py-0.5 rounded-full border border-green-100">
-                       {userStatus.planType === 'pro' ? 'Pro Plan' : 'Basic Plan'}
-                    </span>
-                 )}
-              </div>
-              {user.photoURL ? (
-                <img src={user.photoURL} alt="User" className="w-9 h-9 rounded-full border-2 border-white shadow-sm" />
-              ) : (
-                <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
-                  {user.email?.[0].toUpperCase()}
-                </div>
-              )}
-              <button
-                onClick={() => handleAuth('logout')}
-                className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
-                title="Sign Out"
-              >
-                <LogOut className="w-5 h-5" />
-              </button>
-            </div>
-          )}
+          {/* User status badge — synced with SmartSuccess.AI */}
+          {getUserStatusBadge()}
         </div>
       </header>
 
@@ -404,13 +286,13 @@ const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
             {error && (
               <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm font-medium border border-red-100 flex items-center justify-between animate-fade-in">
                 <span>{error}</span>
-                {(error.includes('upgrade') || error.includes('limit')) && (
+                {(error.includes('upgrade') || error.includes('Upgrade')) && (
                   <button
                     type="button"
-                    onClick={() => user ? setShowUpgradeModal(true) : handleAuth('login')}
+                    onClick={() => isAuthenticated ? triggerUpgrade() : triggerLogin()}
                     className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1 rounded-full transition-colors font-bold"
                   >
-                    Upgrade Now
+                    {isAuthenticated ? 'Upgrade Now' : 'Sign In'}
                   </button>
                 )}
               </div>
@@ -419,7 +301,7 @@ const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
             {/* Generate Button */}
             <button
               type="submit"
-              disabled={loading || Boolean(user && userStatusLoading)}
+              disabled={loading}
               className="w-full py-4 px-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-lg rounded-xl shadow-lg hover:shadow-xl transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
             >
               {loading ? (
@@ -427,8 +309,6 @@ const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
                   <Loader2 className="w-5 h-5 animate-spin" />
                   Analyzing...
                 </>
-              ) : userStatusLoading ? (
-                'Checking Status...'
               ) : (
                 <>
                   Generate Analysis
@@ -436,13 +316,6 @@ const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
                 </>
               )}
             </button>
-            
-            {/* Usage Stats */}
-            {user && userStatus && userStatus.isUpgraded && userStatus.scanLimit !== null && (
-              <div className="text-center text-xs text-gray-400">
-                Monthly Usage: <span className="font-medium text-gray-600">{userStatus.scansUsed}</span> / {userStatus.scanLimit} scans
-              </div>
-            )}
           </form>
         </div>
 
@@ -458,23 +331,6 @@ const MatchwiseApp: React.FC<MatchwiseAppProps> = ({ onBack }) => {
           Powered by SmartSuccess.AI
         </span>
       </footer>
-
-      {/* Modals */}
-      {showUpgradeModal && (
-        <UpgradeModal 
-          onClose={() => setShowUpgradeModal(false)}
-          onUpgradeOneTime={() => handleUpgrade('price_1RnBbcE6OOEHr6Zo6igE1U8B', 'payment')}
-          onUpgradeSub6={() => handleUpgrade('price_1RnBehE6OOEHr6Zo4QLLJZTg', 'payment')}
-          onUpgradeSub15={() => handleUpgrade('price_1RnBgPE6OOEHr6Zo9EFmgyA5', 'subscription')}
-        />
-      )}
-      
-      {showLoginModal && (
-        <LoginModal 
-          onClose={() => setShowLoginModal(false)}
-          message={loginMessage}
-        />
-      )}
     </div>
   );
 };
