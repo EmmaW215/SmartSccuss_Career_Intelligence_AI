@@ -11,7 +11,11 @@ node_modules
 dist
 dist-ssr
 *.local
-*.env.example
+
+# Environment & secrets — NEVER commit
+.env
+.env.*
+!.env.example
 
 # Editor directories and files
 .vscode/*
@@ -23,3 +27,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Cursor IDE
+.cursor/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+data/sessions/
