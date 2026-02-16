@@ -1,6 +1,10 @@
 """
 Configuration Management for SmartSuccess Interview Backend
 Uses Pydantic Settings for type-safe environment variable handling
+
+HOTFIX: Updated Gemini model names from deprecated versions
+- gemini-2.0-flash-exp → gemini-2.5-flash (primary)
+- gemini-1.5-flash → gemini-2.0-flash (fallback)
 """
 
 import os
@@ -45,8 +49,11 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 1024
     
     # Phase 2: Gemini Configuration (when cost_optimized_mode=True)
-    gemini_model_primary: str = "gemini-2.0-flash-exp"
-    gemini_model_fallback: str = "gemini-1.5-flash"
+    # HOTFIX: Updated from deprecated model names
+    # Old: gemini-2.0-flash-exp (404), gemini-1.5-flash (404)
+    # New: gemini-2.5-flash (active), gemini-2.0-flash (active)
+    gemini_model_primary: str = "gemini-2.5-flash"
+    gemini_model_fallback: str = "gemini-2.0-flash"
     
     # Phase 2: GPU Server Configuration (optional)
     gpu_server_url: Optional[str] = None
@@ -92,17 +99,18 @@ class Settings(BaseSettings):
 
 # Phase 2: Cost-Optimized Model Configuration (optional)
 # Fallback chain: Gemini (free) → Groq/Llama (free) → OpenAI (paid, last resort)
+# HOTFIX: Updated Gemini model names to currently active versions
 COST_OPTIMIZED_CONFIG = {
     "llm": {
         "primary": {
             "provider": "gemini",
-            "model": "gemini-2.0-flash-exp",
+            "model": "gemini-2.5-flash",       # HOTFIX: was gemini-2.0-flash-exp (404)
             "cost_per_1m_tokens": 0,  # Free tier: 1500 req/day
             "daily_limit": 1500
         },
         "fallback": {
             "provider": "gemini",
-            "model": "gemini-1.5-flash",
+            "model": "gemini-2.0-flash",        # HOTFIX: was gemini-1.5-flash (404)
             "cost_per_1m_tokens": 0.075  # ~$0.075/1M
         },
         "groq_fallback": {
