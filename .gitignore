@@ -35,4 +35,10 @@ dist-ssr
 __pycache__/
 *.pyc
 *.pyo
+*.bak
+.venv/
+venv/
 data/sessions/
+**/data/sessions/
+app_backup/
+**/app_backup/

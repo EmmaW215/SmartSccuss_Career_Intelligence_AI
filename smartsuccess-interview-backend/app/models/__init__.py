@@ -1,6 +1,11 @@
 """
 Data Models for SmartSuccess Interview Backend
 Pydantic models for API requests/responses and internal data structures
+
+FIXES APPLIED:
+- C-B1 (Sprint 1): Added follow_up_count and follow_ups_used to InterviewSession
+- F-A1 (Sprint 1): Added to_dict() for session persistence serialization
+- D-T5 (Sprint 5): QuestionDifficulty now used in difficulty progression
 """
 
 from typing import List, Dict, Optional, Any
@@ -57,6 +62,18 @@ class InterviewSession(BaseModel):
     max_questions: int = 5
     duration_limit_minutes: int = 15
     
+    # FIX: C-B1 (Sprint 1) — Follow-up state on session, NOT on singleton service
+    # Prevents thread-safety issues with concurrent sessions
+    follow_up_count: Dict[int, int] = Field(default_factory=dict)  # key: question_index, value: count
+    follow_ups_used: int = 0  # Total follow-ups used this session
+    
+    # FIX: C-B3 (Sprint 3) — Track which competencies have been covered
+    competencies_covered: List[str] = Field(default_factory=list)
+    asked_indices: List[int] = Field(default_factory=list)  # Track which question indices used
+    
+    # FIX: D-T1 (Sprint 1) — Detected technical domain for this session
+    detected_domain: Optional[str] = None
+    
     class Config:
         use_enum_values = True
 
@@ -110,11 +127,12 @@ class STARScore(BaseModel):
 
 class ScreeningFeedback(BaseModel):
     """Feedback for screening interview responses"""
+    # FIX: B-S3 (Sprint 3) — Renamed criteria for text-appropriate assessment
     communication_clarity: int = Field(ge=1, le=5)
     relevance: int = Field(ge=1, le=5)
-    confidence: int = Field(ge=1, le=5)
+    specificity: int = Field(ge=1, le=5)  # FIX: was "confidence"
     professionalism: int = Field(ge=1, le=5)
-    enthusiasm: int = Field(ge=1, le=5)
+    self_awareness: int = Field(ge=1, le=5)  # FIX: was "enthusiasm"
     
     strength: str = ""
     improvement: str = ""
@@ -125,9 +143,9 @@ class ScreeningFeedback(BaseModel):
         scores = [
             self.communication_clarity,
             self.relevance,
-            self.confidence,
+            self.specificity,
             self.professionalism,
-            self.enthusiasm
+            self.self_awareness
         ]
         return sum(scores) / len(scores)
 
@@ -202,6 +220,9 @@ class SessionSummary(BaseModel):
     recommendation: str = ""
     detailed_feedback: List[QuestionResponse] = Field(default_factory=list)
     
+    # FIX: I-D2 (Sprint 5) — Score distribution metrics
+    score_statistics: Optional[Dict[str, Any]] = None
+    
     class Config:
         use_enum_values = True
 
@@ -233,13 +254,14 @@ class MessageRequest(BaseModel):
 
 class MessageResponse(BaseModel):
     """Response to a message in an interview"""
-    type: str  # "question", "completion", "error"
+    type: str  # "question", "completion", "error", "validation_guidance"
     message: str
     question_number: Optional[int] = None
     total_questions: Optional[int] = None
-    is_complete: Optional[bool] = None  # Phase 2: Add completion flag
+    is_complete: Optional[bool] = None
     evaluation: Optional[Dict[str, Any]] = None
     summary: Optional[SessionSummary] = None
+    should_retry: Optional[bool] = None  # FIX: A-Q7 — validation guidance
 
 
 class VoiceRequest(BaseModel):
