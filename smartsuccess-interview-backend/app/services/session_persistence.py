@@ -154,6 +154,22 @@ class PersistentSessionStore:
         return len(self._cache)
     
     # Dict-like interface for backward compatibility
+    # HOTFIX: Added .items()/.values()/.keys() for dashboard.py compatibility
+    def items(self):
+        """Iterate over all sessions as (session_id, session_data) pairs."""
+        return self._cache.items()
+    
+    def values(self):
+        """Iterate over all session values."""
+        return self._cache.values()
+    
+    def keys(self):
+        """Iterate over all session IDs."""
+        return self._cache.keys()
+    
+    def __len__(self) -> int:
+        return len(self._cache)
+    
     def __contains__(self, session_id: str) -> bool:
         return session_id in self._cache
     

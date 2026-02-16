@@ -5,10 +5,7 @@ Session management for Phase 2 features (customize, dashboard)
 FIX: F-A1 — Added optional file-backed persistence via PersistentSessionStore
 FIX: F-A2 — Replaced manual singleton with @lru_cache pattern
 FIX: F-A3 — Integrated cleanup with rate-limiter awareness
-
-Note: This is separate from Phase 1 interview session management.
-Phase 1 sessions use services/session_persistence.py (new).
-Phase 2 sessions use this module.
+HOTFIX: Added .items(), .values(), .keys(), __len__ for dashboard compatibility
 """
 
 import time
@@ -112,6 +109,38 @@ class SessionStore:
             )
         else:
             self._disk_store = None
+
+    # ──────────────────────────────────────────
+    # Dict-like access (HOTFIX for dashboard.py)
+    # ──────────────────────────────────────────
+
+    def items(self):
+        """Iterate over all sessions as (session_id, session) pairs.
+        
+        HOTFIX: Required by dashboard.py lines 82, 150 which call
+        service.sessions.items() to iterate over all sessions.
+        """
+        return self._sessions.items()
+
+    def values(self):
+        """Iterate over all session objects."""
+        return self._sessions.values()
+
+    def keys(self):
+        """Iterate over all session IDs."""
+        return self._sessions.keys()
+
+    def __len__(self) -> int:
+        """Return number of active sessions."""
+        return len(self._sessions)
+
+    def __contains__(self, session_id: str) -> bool:
+        """Check if session exists."""
+        return session_id in self._sessions
+
+    def __getitem__(self, session_id: str) -> InterviewSession:
+        """Get session by ID (dict-style access)."""
+        return self._sessions[session_id]
 
     # ──────────────────────────────────────────
     # CRUD

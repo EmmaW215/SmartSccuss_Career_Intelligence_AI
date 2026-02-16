@@ -6,6 +6,8 @@ Falls back to Edge-TTS (FREE) when GPU unavailable
 FIXES APPLIED:
 - E-A2 (Sprint 1): text-mode fallback when GPU STT fails
                     (previously raised hard exception, now returns guidance)
+- HOTFIX (Voice Fix): RAISE exception instead of returning error text,
+                      so voice.py try/except triggers OpenAI Whisper fallback
 """
 
 import time
@@ -23,6 +25,7 @@ logger = logging.getLogger(__name__)
 class VoiceProvider(Enum):
     GPU = "gpu"              # Self-hosted, best quality
     EDGE_TTS = "edge_tts"    # Free Microsoft TTS
+    OPENAI = "openai"        # OpenAI Whisper API (fallback STT)
     NONE = "none"            # Text-only mode
 
 
@@ -141,8 +144,18 @@ class GPUClient:
         """
         Transcribe audio using GPU Whisper
 
-        FIX: E-A2 (Sprint 1) — Graceful text-mode fallback instead of hard exception.
-        Returns guidance message when STT unavailable.
+        HOTFIX: Raise exception when GPU STT is unavailable.
+        This triggers the try/except in voice.py, enabling
+        OpenAI Whisper API fallback instead of returning
+        "[VOICE_UNAVAILABLE]" as transcription text.
+
+        Previous behavior (BROKEN):
+            return ("[VOICE_UNAVAILABLE] ...", VoiceProvider.NONE)
+            # ^ This was treated as successful transcription text!
+
+        Fixed behavior:
+            raise Exception("GPU STT unavailable ...")
+            # ^ This triggers voice.py fallback to OpenAI Whisper
         """
         status = await self.check_health()
 
@@ -154,12 +167,22 @@ class GPUClient:
             except Exception as e:
                 logger.warning(f"GPU STT failed: {e}")
 
-        # FIX: E-A2 — Return guidance instead of raising hard exception
-        # This lets the frontend gracefully switch to text input
-        return (
-            "[VOICE_UNAVAILABLE] Speech-to-text is currently unavailable. "
-            "Please switch to text input mode.",
-            VoiceProvider.NONE
+        # ============================================================
+        # HOTFIX: Raise exception to trigger OpenAI Whisper fallback
+        # ============================================================
+        # Previously returned error text as "transcription", which
+        # bypassed the fallback chain in voice.py lines 56-72.
+        # Now raises an exception so voice.py's try/except catches it
+        # and falls through to OpenAI Whisper API.
+        # ============================================================
+        error_detail = status.get("error", "GPU server not reachable")
+        logger.warning(
+            f"GPU STT unavailable ({error_detail}), "
+            f"raising exception to trigger OpenAI fallback"
+        )
+        raise Exception(
+            f"GPU STT unavailable: {error_detail}. "
+            f"Falling back to OpenAI Whisper."
         )
 
     async def synthesize(
