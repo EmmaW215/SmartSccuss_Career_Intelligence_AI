@@ -52,15 +52,48 @@ class InterviewApiService {
   }
 
   /**
-   * Start a new interview
+   * Check GPU server availability for custom interviews.
+   * Used to determine whether to show file upload UI or fallback mode.
+   */
+  async checkGpuStatus(): Promise<{
+    available: boolean;
+    message: string;
+  }> {
+    try {
+      const response = await fetch(
+        `${this.baseUrl}/api/interview/customize/gpu-status`
+      );
+      if (!response.ok) {
+        return { available: false, message: 'GPU status unknown' };
+      }
+      const data = await response.json();
+      return {
+        available: data.available ?? false,
+        message: data.message ?? ''
+      };
+    } catch {
+      return { available: false, message: 'Cannot reach server' };
+    }
+  }
+
+  /**
+   * Start a new interview.
+   *
+   * For customize interviews with files: checks GPU first.
+   * If GPU unavailable, gracefully degrades to standard /start (no RAG).
    */
   async startInterview(
     interviewType: string,
     request: StartInterviewRequest
   ): Promise<StartInterviewResponse> {
-    // Handle customize interview with files
+    // Handle customize interview with files — only attempt upload when GPU is up
     if (interviewType === 'customize' && request.customDocuments?.length) {
-      return this.startCustomizeInterview(request);
+      const gpuStatus = await this.checkGpuStatus();
+      if (gpuStatus.available) {
+        return this.startCustomizeInterview(request);
+      }
+      // GPU unavailable: fall through to standard /start (no RAG upload)
+      console.warn('GPU unavailable, starting customize interview without custom RAG');
     }
 
     const response = await fetch(`${this.baseUrl}/api/interview/${interviewType}/start`, {
@@ -141,18 +174,12 @@ class InterviewApiService {
     let body: string | FormData;
     let headers: HeadersInit = {};
 
-    if (interviewType === 'customize') {
-      const formData = new FormData();
-      formData.append('session_id', sessionId);
-      formData.append('user_response', userResponse);
-      body = formData;
-    } else {
-      headers['Content-Type'] = 'application/json';
-      body = JSON.stringify({
-        session_id: sessionId,
-        user_response: userResponse
-      });
-    }
+    // All interview types (including customize) use JSON for /respond
+    headers['Content-Type'] = 'application/json';
+    body = JSON.stringify({
+      session_id: sessionId,
+      user_response: userResponse
+    });
 
     const response = await fetch(endpoint, {
       method: 'POST',

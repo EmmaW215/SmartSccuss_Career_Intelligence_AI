@@ -18,13 +18,19 @@ interface FileUploaderProps {
   acceptedFormats?: string[];
   maxFiles?: number;
   maxSizeMB?: number;
+  /** When true, the upload area is fully disabled (greyed out). */
+  disabled?: boolean;
+  /** When true, shows a friendly "GPU unavailable" message instead of the drop zone. */
+  gpuUnavailable?: boolean;
 }
 
 export const FileUploader: React.FC<FileUploaderProps> = ({
   onFilesChange,
   acceptedFormats = ['.pdf', '.txt', '.md', '.docx'],
   maxFiles = 5,
-  maxSizeMB = 10
+  maxSizeMB = 10,
+  disabled = false,
+  gpuUnavailable = false
 }) => {
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -130,19 +136,50 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
     }
   };
 
+  // GPU unavailable — show friendly fallback instead of drop zone
+  if (gpuUnavailable) {
+    return (
+      <div className="file-uploader">
+        <div className="border-2 border-dashed border-gray-200 rounded-lg p-8 bg-gray-50">
+          <div className="flex flex-col items-center gap-4 text-center">
+            <span className="text-4xl">💡</span>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">
+                Smart Interview Mode
+              </h3>
+              <p className="text-gray-600 max-w-md mx-auto">
+                Your interview will use our comprehensive question bank covering
+                screening, behavioral, and technical topics — tailored to your
+                responses in real time.
+              </p>
+            </div>
+            <div className="mt-2 flex items-center gap-2 text-sm text-gray-400">
+              <span>📄</span>
+              <span>Document upload is temporarily unavailable</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const isDisabled = disabled;
+
   return (
-    <div className="file-uploader">
+    <div className={`file-uploader ${isDisabled ? 'opacity-60 pointer-events-none' : ''}`}>
       {/* Drop Zone */}
       <div
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
+        onDrop={isDisabled ? undefined : handleDrop}
+        onDragOver={isDisabled ? undefined : handleDragOver}
+        onDragLeave={isDisabled ? undefined : handleDragLeave}
         className={`
-          border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
+          border-2 border-dashed rounded-lg p-8 text-center
           transition-colors duration-200
-          ${isDragActive 
-            ? 'border-blue-500 bg-blue-50' 
-            : 'border-gray-300 hover:border-gray-400'
+          ${isDisabled
+            ? 'border-gray-200 bg-gray-50 cursor-not-allowed'
+            : isDragActive 
+              ? 'border-blue-500 bg-blue-50 cursor-pointer' 
+              : 'border-gray-300 hover:border-gray-400 cursor-pointer'
           }
         `}
       >
@@ -153,8 +190,9 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
           onChange={handleFileInput}
           className="hidden"
           id="file-input"
+          disabled={isDisabled}
         />
-        <label htmlFor="file-input" className="cursor-pointer">
+        <label htmlFor="file-input" className={isDisabled ? 'cursor-not-allowed' : 'cursor-pointer'}>
           <div className="flex flex-col items-center gap-3">
             <span className="text-4xl">📁</span>
             {isDragActive ? (
