@@ -6,6 +6,7 @@ Note: This is an optional feature. Only works when Phase 2 session store is enab
 """
 
 from typing import Optional, List
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -48,7 +49,7 @@ async def get_interview_history(
     history = []
     
     # Get from SessionStore if available
-    if session_store:
+    if session_store is not None:  # BUGFIX: identity check
         status_filter = None
         if status:
             try:
@@ -80,11 +81,15 @@ async def get_interview_history(
             try:
                 service = service_getter()
                 for session_id, base_session in service.sessions.items():
-                    if base_session.user_id == user_id:
+                    # BUGFIX: Safe access — base_session may be dict after JSON round-trip
+                    _uid = getattr(base_session, 'user_id', None) or (base_session.get('user_id') if isinstance(base_session, dict) else None)
+                    if _uid == user_id:
                         # Safely access phase and interview_type (handle both Enum and string)
                         from enum import Enum
-                        phase_value = base_session.phase.value if isinstance(base_session.phase, Enum) else str(base_session.phase)
-                        interview_type_value = base_session.interview_type.value if isinstance(base_session.interview_type, Enum) else str(base_session.interview_type)
+                        _phase = getattr(base_session, 'phase', None) or (base_session.get('phase') if isinstance(base_session, dict) else None)
+                        phase_value = _phase.value if isinstance(_phase, Enum) else str(_phase) if _phase else 'pending'
+                        _itype = getattr(base_session, 'interview_type', None) or (base_session.get('interview_type') if isinstance(base_session, dict) else None)
+                        interview_type_value = _itype.value if isinstance(_itype, Enum) else str(_itype) if _itype else 'unknown'
                         
                         # Check status filter
                         if status:
@@ -100,15 +105,22 @@ async def get_interview_history(
                         # Normalize interview_type format
                         interview_type_str = interview_type_value.lower().replace(" interview", "")
                         
+                        # BUGFIX: Safe access for all fields (may be dict after JSON round-trip)
+                        _sid = getattr(base_session, 'session_id', None) or (base_session.get('session_id') if isinstance(base_session, dict) else session_id)
+                        _responses = getattr(base_session, 'responses', []) if not isinstance(base_session, dict) else base_session.get('responses', [])
+                        _questions = getattr(base_session, 'questions_asked', []) if not isinstance(base_session, dict) else base_session.get('questions_asked', [])
+                        _created = getattr(base_session, 'created_at', None) if not isinstance(base_session, dict) else base_session.get('created_at')
+                        _completed = getattr(base_session, 'completed_at', None) if not isinstance(base_session, dict) else base_session.get('completed_at')
+                        
                         history.append({
-                            "session_id": base_session.session_id,
+                            "session_id": _sid,
                             "interview_type": interview_type_str,
                             "status": "completed" if phase_value == "completed" else "in_progress",
-                            "questions_answered": len(base_session.responses),
-                            "total_questions": len(base_session.questions_asked),
+                            "questions_answered": len(_responses) if _responses else 0,
+                            "total_questions": len(_questions) if _questions else 0,
                             "voice_enabled": False,
-                            "created_at": base_session.created_at.isoformat(),
-                            "completed_at": base_session.completed_at.isoformat() if base_session.completed_at else None
+                            "created_at": _created.isoformat() if hasattr(_created, 'isoformat') else str(_created) if _created else datetime.now().isoformat(),
+                            "completed_at": _completed.isoformat() if hasattr(_completed, 'isoformat') else str(_completed) if _completed else None
                         })
             except Exception as e:
                 print(f"Error getting sessions from service: {e}")
@@ -138,7 +150,7 @@ async def get_user_stats(
     all_sessions_list = []
     
     # Get from SessionStore if available
-    if session_store:
+    if session_store is not None:  # BUGFIX: identity check
         store_sessions = session_store.get_user_sessions(user_id=user_id, limit=100)
         all_sessions_list.extend(store_sessions)
     
@@ -148,7 +160,9 @@ async def get_user_stats(
             try:
                 service = service_getter()
                 for session_id, base_session in service.sessions.items():
-                    if base_session.user_id == user_id:
+                    # BUGFIX: Safe access — base_session may be dict after JSON round-trip
+                    _uid = getattr(base_session, 'user_id', None) or (base_session.get('user_id') if isinstance(base_session, dict) else None)
+                    if _uid == user_id:
                         # Convert to StoreSession format for consistency
                         if session_store:
                             store_session = convert_base_session_to_store(base_session, session_store)
@@ -163,20 +177,23 @@ async def get_user_stats(
                             from enum import Enum
                             
                             # Safely access phase and interview_type (handle both Enum and string)
-                            phase_value = base_session.phase.value if isinstance(base_session.phase, Enum) else str(base_session.phase)
-                            interview_type_value = base_session.interview_type.value if isinstance(base_session.interview_type, Enum) else str(base_session.interview_type)
+                            _phase = getattr(base_session, 'phase', None) or (base_session.get('phase') if isinstance(base_session, dict) else None)
+                            phase_value = _phase.value if isinstance(_phase, Enum) else str(_phase) if _phase else 'pending'
+                            _itype = getattr(base_session, 'interview_type', None) or (base_session.get('interview_type') if isinstance(base_session, dict) else None)
+                            interview_type_value = _itype.value if isinstance(_itype, Enum) else str(_itype) if _itype else 'unknown'
                             
                             # Map phase to status (handle both Enum and string)
-                            if isinstance(base_session.phase, Enum):
+                            # BUGFIX: use _phase (safe access) instead of base_session.phase
+                            if isinstance(_phase, Enum):
                                 status_map = {
                                     InterviewPhase.COMPLETED: InterviewStatus.COMPLETED,
                                     InterviewPhase.IN_PROGRESS: InterviewStatus.IN_PROGRESS,
                                     InterviewPhase.GREETING: InterviewStatus.PENDING
                                 }
-                                temp_status = status_map.get(base_session.phase, InterviewStatus.PENDING)
+                                temp_status = status_map.get(_phase, InterviewStatus.PENDING)
                             else:
                                 # If phase is already a string, map directly
-                                phase_str = str(base_session.phase).lower()
+                                phase_str = str(_phase).lower() if _phase else "pending"
                                 if phase_str == "completed":
                                     temp_status = InterviewStatus.COMPLETED
                                 elif phase_str == "in_progress":
@@ -187,19 +204,26 @@ async def get_user_stats(
                             # Normalize interview_type format
                             interview_type_str = interview_type_value.lower().replace(" interview", "")
                             
+                            # BUGFIX: Safe attribute access for all base_session fields
+                            _sid = getattr(base_session, 'session_id', None) or (base_session.get('session_id') if isinstance(base_session, dict) else session_id)
+                            _cqi = getattr(base_session, 'current_question_index', 0) if not isinstance(base_session, dict) else base_session.get('current_question_index', 0)
+                            _created = getattr(base_session, 'created_at', None) or (base_session.get('created_at') if isinstance(base_session, dict) else None)
+                            _started = getattr(base_session, 'started_at', None) or (base_session.get('started_at') if isinstance(base_session, dict) else None)
+                            _completed = getattr(base_session, 'completed_at', None) or (base_session.get('completed_at') if isinstance(base_session, dict) else None)
+                            
                             temp_session = StoreSession(
-                                session_id=base_session.session_id,
-                                user_id=base_session.user_id,
+                                session_id=_sid,
+                                user_id=_uid,
                                 interview_type=interview_type_str,
                                 status=temp_status,
-                                current_question_index=base_session.current_question_index,
+                                current_question_index=_cqi,
                                 questions=[],
                                 responses=[],
                                 feedback_hints=[],
-                                created_at=base_session.created_at,
-                                started_at=base_session.started_at,
-                                completed_at=base_session.completed_at,
-                                last_activity=base_session.created_at,
+                                created_at=_created or datetime.now(),
+                                started_at=_started,
+                                completed_at=_completed,
+                                last_activity=_completed or _started or _created or datetime.now(),
                                 voice_enabled=False,
                                 voice_provider="none"
                             )
@@ -236,7 +260,7 @@ async def get_session_feedback(
 ):
     """Get detailed feedback for a completed session"""
     session_store = get_session_store(request)
-    if not session_store:
+    if session_store is None:  # BUGFIX: identity check, not truthiness
         raise HTTPException(status_code=503, detail="Session store not available")
     
     session = session_store.get_session(session_id)
@@ -293,7 +317,7 @@ async def generate_interview_report(
     is_from_store = False
     
     # Try to get from SessionStore first
-    if session_store:
+    if session_store is not None:  # BUGFIX: identity check
         session = session_store.get_session(session_id)
         is_from_store = True
     
