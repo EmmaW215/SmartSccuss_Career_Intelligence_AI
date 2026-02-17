@@ -3,7 +3,7 @@
  * Manages interview session state and API communication
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { interviewApi } from '../services/interviewApi';
 
 interface StartInterviewOptions {
@@ -49,6 +49,8 @@ interface UseInterviewSessionReturn {
   endInterview: () => Promise<EndInterviewResult>;
   isLoading: boolean;
   error: string | null;
+  /** Whether the GPU server is available for custom RAG uploads. null = still checking. */
+  gpuAvailable: boolean | null;
 }
 
 export const useInterviewSession = (
@@ -58,6 +60,19 @@ export const useInterviewSession = (
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string>(sessionId);
+  const [gpuAvailable, setGpuAvailable] = useState<boolean | null>(null);
+
+  // Check GPU status on mount for customize interviews
+  useEffect(() => {
+    if (interviewType === 'customize') {
+      interviewApi.checkGpuStatus().then(status => {
+        setGpuAvailable(status.available);
+      });
+    } else {
+      // Non-customize types don't need GPU — mark as irrelevant
+      setGpuAvailable(null);
+    }
+  }, [interviewType]);
 
   /**
    * Start a new interview session
@@ -190,7 +205,8 @@ export const useInterviewSession = (
     sendResponse,
     endInterview,
     isLoading,
-    error
+    error,
+    gpuAvailable
   };
 };
 
