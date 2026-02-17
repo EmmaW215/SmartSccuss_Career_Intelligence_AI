@@ -134,6 +134,15 @@ class SessionStore:
         """Return number of active sessions."""
         return len(self._sessions)
 
+    def __bool__(self) -> bool:
+        """Always return True — store instance exists even when empty.
+
+        BUGFIX: Without this, Python falls back to __len__() for truthiness.
+        An empty store (len==0) evaluates as False, causing 'if not store:'
+        to incorrectly treat a valid empty store as None/missing.
+        """
+        return True
+
     def __contains__(self, session_id: str) -> bool:
         """Check if session exists."""
         return session_id in self._sessions

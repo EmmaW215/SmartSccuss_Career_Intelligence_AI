@@ -96,15 +96,33 @@ class BaseInterviewService(ABC):
         
         Includes up to last 3 Q&A pairs for consistency and progression
         assessment. Keeps token cost low (~200-400 extra tokens).
+        
+        BUGFIX: Defensive access for sessions loaded from disk as raw dicts
+        via PersistentSessionStore._load_existing().
         """
         history_lines = []
         start = max(0, current_index - 3)
         
+        questions = getattr(session, "questions_asked", []) or []
+        responses = getattr(session, "responses", []) or []
+        
         for i in range(start, current_index):
-            q = (session.questions_asked[i] 
-                 if i < len(session.questions_asked) else "")
-            r = (session.responses[i].get("response", "") 
-                 if i < len(session.responses) else "")
+            # Defensive question access
+            q = ""
+            if isinstance(questions, list) and i < len(questions):
+                q = str(questions[i]) if questions[i] else ""
+            
+            # Defensive response access — handle both list[dict] and edge cases
+            r = ""
+            if isinstance(responses, list) and i < len(responses):
+                resp = responses[i]
+                if isinstance(resp, dict):
+                    r = resp.get("response", "")
+                elif isinstance(resp, str):
+                    r = resp
+                else:
+                    r = str(resp) if resp else ""
+            
             if q or r:
                 history_lines.append(f"Q{i+1}: {q}\nA{i+1}: {r}")
         

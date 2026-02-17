@@ -170,6 +170,10 @@ class PersistentSessionStore:
     def __len__(self) -> int:
         return len(self._cache)
     
+    def __bool__(self) -> bool:
+        """Always return True — store instance exists even when empty."""
+        return True
+    
     def __contains__(self, session_id: str) -> bool:
         return session_id in self._cache
     

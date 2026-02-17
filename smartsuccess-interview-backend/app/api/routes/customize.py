@@ -122,7 +122,7 @@ async def start_customize_interview(
     """Start a custom interview (after upload/build)"""
     # Check if Phase 2 features are enabled
     session_store = get_session_store(request)
-    if not session_store:
+    if session_store is None:  # BUGFIX: use identity check, not truthiness
         raise HTTPException(
             status_code=503,
             detail="Custom interview feature requires Phase 2 session store. Please ensure Phase 2 features are enabled."
@@ -190,7 +190,7 @@ async def submit_response(
 ):
     """Submit a response and get next question"""
     session_store = get_session_store(request)
-    if not session_store:
+    if session_store is None:  # BUGFIX: use identity check, not truthiness
         raise HTTPException(status_code=503, detail="Session store not available")
     
     conversation_engine = get_conversation_engine()
