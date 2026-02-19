@@ -1188,7 +1188,7 @@ For issues, questions, or contributions:
 
 **Built with ❤️ for the next generation of AI leaders**
 
-[Website]([https://smartsuccess.ai](https://smart-sccuss-career-intelligence-ai.vercel.app/)) • [Documentation](#) • [GitHub]([https://github.com/yourusername/smartsuccess-ai](https://github.com/EmmaW215/SmartSccuss_Career_Intelligence_AI))
+[Website](https://smart-sccuss-career-intelligence-ai.vercel.app/) • [Documentation](#) • [GitHub](https://github.com/EmmaW215/SmartSccuss_Career_Intelligence_AI)
 
 </div>
 
