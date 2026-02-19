@@ -1181,7 +1181,6 @@ MIT License - see LICENSE file for details
 
 For issues, questions, or contributions:
 - GitHub Issues: [Create an issue](https://github.com/EmmaW215/SmartSccuss_Career_Intelligence_AI/issues)
-- Email: support@smartsuccess.ai
 
 ---
 
