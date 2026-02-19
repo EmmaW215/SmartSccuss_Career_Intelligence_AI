@@ -1,7 +1,5 @@
 # SmartSuccess.AI - Complete Platform Documentation
 
-https://smart-sccuss-career-intelligence-ai.vercel.app/
-
 <div align="center">
 
 ![SmartSuccess.AI](https://img.shields.io/badge/SmartSuccess.AI-Platform-blue)
@@ -1203,5 +1201,5 @@ For issues, questions, or contributions:
 
 <img width="2242" height="1190" alt="image" src="https://github.com/user-attachments/assets/76687d06-9264-4f91-a9fa-31092c8af169" />
 
-
+https://smart-sccuss-career-intelligence-ai.vercel.app/
 
