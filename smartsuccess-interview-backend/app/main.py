@@ -71,7 +71,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️  Phase 2 session store not initialized: {e}")
         app.state.session_store = None
-    
+
+    # Phase 2 Agent Tools: status logging (PRD 02_PHASE2_AGENT_TOOLS.md)
+    try:
+        from app.config import settings as _settings
+        if _settings.use_agent_tools:
+            print("🤖 Agent tools ENABLED (USE_AGENT_TOOLS=true) — "
+                  f"tool_call_logs → {_settings.tool_call_log_dir}")
+        if _settings.use_mcp_tools:
+            print("🔌 MCP tools flag set (USE_MCP_TOOLS=true) — run the MCP "
+                  "server with: python -m app.agent.mcp_server")
+    except Exception as e:
+        print(f"⚠️  Agent tools status check failed: {e}")
+
     yield
     
     # Shutdown

@@ -49,6 +49,17 @@ except ImportError:
     sync_base_session_to_store = None
     SessionStore = None
 
+# Phase 2 Agent Tools: optional agent-driven rounds (USE_AGENT_TOOLS=true)
+from app.config import settings
+
+try:
+    from app.agent.interviewer_agent import AgentInterviewer, write_tool_call_log
+    AGENT_TOOLS_AVAILABLE = True
+except ImportError:
+    AGENT_TOOLS_AVAILABLE = False
+    AgentInterviewer = None
+    write_tool_call_log = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -330,7 +341,17 @@ class BaseInterviewService(ABC):
         ]
         if any(keyword in user_lower for keyword in end_keywords):
             return await self._complete_interview(session)
-        
+
+        # Phase 2 Agent Tools: agent-driven round when USE_AGENT_TOOLS=true.
+        # Any failure falls through to the unchanged Phase 1 flow below.
+        if AGENT_TOOLS_AVAILABLE and settings.use_agent_tools:
+            try:
+                return await self._handle_agent_round(session, user_message)
+            except Exception as e:
+                logger.warning(
+                    f"Agent tools round failed, falling back to Phase 1 flow: {e}"
+                )
+
         # Evaluate the response
         evaluation = await self._evaluate_response(session, user_message)
         
@@ -397,6 +418,99 @@ class BaseInterviewService(ABC):
             evaluation=evaluation
         )
     
+    # ================================================================
+    # Phase 2 Agent Tools — agent-driven round (USE_AGENT_TOOLS=true)
+    # ================================================================
+
+    async def _handle_agent_round(
+        self,
+        session: InterviewSession,
+        user_message: str
+    ) -> MessageResponse:
+        """
+        Run one interview round through the tool-calling agent.
+
+        Produces the same session/response shape as the Phase 1 flow,
+        plus a persisted tool_call_log (Step D evidence). Only reachable
+        when settings.use_agent_tools is True.
+        """
+        interview_type_value = (
+            session.interview_type.value
+            if hasattr(session.interview_type, "value")
+            else str(session.interview_type)
+        )
+        current_question = (
+            session.questions_asked[-1] if session.questions_asked else ""
+        )
+
+        agent = AgentInterviewer(
+            # Tests inject a scripted LLM via _agent_chat_override
+            chat_fn=getattr(self, "_agent_chat_override", None),
+            llm_generate=self.llm.generate,
+        )
+        round_result = await agent.run_round(
+            session_context={
+                "session_id": session.session_id,
+                "interview_type": interview_type_value,
+                "resume_text": session.resume_text,
+                "job_description": session.job_description,
+                "questions_asked": list(session.questions_asked),
+                "current_question_index": session.current_question_index,
+            },
+            current_question=current_question,
+            user_answer=user_message,
+        )
+
+        # Record the response (Phase 1 shape + agent evidence fields)
+        session.responses.append({
+            "question_index": session.current_question_index,
+            "question": current_question,
+            "response": user_message,
+            "evaluation": round_result.evaluation,
+            "tool_call_log": [r.to_dict() for r in round_result.tool_call_log],
+            "decision_chain": round_result.decision_chain,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+        # Persist Step D evidence log (best effort — never break the round)
+        try:
+            write_tool_call_log(
+                result=round_result,
+                session_id=session.session_id,
+                round_index=session.current_question_index,
+                user_answer=user_message,
+                log_dir=settings.tool_call_log_dir,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to write tool_call_log: {e}")
+
+        if self.session_store and SESSION_STORE_AVAILABLE:
+            try:
+                sync_base_session_to_store(session, self.session_store)
+            except Exception as e:
+                logger.warning(f"Failed to sync session to SessionStore: {e}")
+
+        session.current_question_index += 1
+
+        if self._should_complete(session):
+            return await self._complete_interview(session)
+
+        next_question = round_result.next_question
+        session.questions_asked.append(next_question)
+        session.messages.append({
+            "role": "assistant",
+            "content": next_question,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+        return MessageResponse(
+            type="question",
+            message=next_question,
+            question_number=session.current_question_index + 1,
+            total_questions=self.max_questions,
+            evaluation=round_result.evaluation
+        )
+
     def _should_complete(self, session: InterviewSession) -> bool:
         """Check if the interview should complete"""
         if session.current_question_index >= self.max_questions:

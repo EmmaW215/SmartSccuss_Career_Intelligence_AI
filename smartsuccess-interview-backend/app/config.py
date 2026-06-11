@@ -63,6 +63,13 @@ class Settings(BaseSettings):
     
     # Phase 2: Conversation Engine (natural conversation mode)
     use_conversation_engine: bool = True  # Enable natural conversation style
+
+    # Phase 2 Agent Tools (PRD: 02_PHASE2_AGENT_TOOLS.md)
+    # Default OFF: Phase 1 interview behavior is completely unchanged
+    use_agent_tools: bool = False  # True = agent-driven rounds with tool calling
+    use_mcp_tools: bool = False  # True = expose tools via MCP server (Step E)
+    agent_max_tool_iterations: int = 6  # Max LLM<->tool loop turns per round
+    tool_call_log_dir: str = "data/tool_call_logs"  # Step D evidence output
     
     # Phase 2: Edge-TTS Fallback (free Microsoft TTS)
     edge_tts_voice: str = "en-US-AriaNeural"

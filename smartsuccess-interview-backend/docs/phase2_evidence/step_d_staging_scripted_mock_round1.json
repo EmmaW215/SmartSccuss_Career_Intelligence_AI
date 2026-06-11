@@ -1,0 +1,78 @@
+{
+  "session_id": "step_d_staging_scripted_mock",
+  "round": 1,
+  "timestamp": "2026-06-11T20:12:15.180098Z",
+  "mode": "scripted_mock",
+  "user_answer_preview": "I'm a machine learning engineer with five years of Python experience. At TechCorp I designed a RAG question-answering platform with LangChain and ChromaDB, deployed it on GCP Cloud Run, and reduced in",
+  "next_question": "Why are you interested in this role?",
+  "evaluation": {
+    "ok": true,
+    "scores": {
+      "communication_clarity": 2,
+      "relevance": 2,
+      "specificity": 3,
+      "professionalism": 2,
+      "self_awareness": 2
+    },
+    "overall": 2.2,
+    "feedback": "Heuristic score (LLM unavailable): based on answer length, structure and specificity.",
+    "method": "heuristic"
+  },
+  "tool_call_log": [
+    {
+      "seq": 1,
+      "tool": "score_answer",
+      "arguments": {
+        "question": "Tell me about yourself.",
+        "answer": "I'm a machine learning engineer with five years of Python experience. At TechCorp I designed a RAG question-answering platform with LangChain and ChromaDB, deployed it on GCP Cloud Run, and reduced inference cost per query by 30%.",
+        "interview_type": "screening"
+      },
+      "status": "ok",
+      "result_summary": "{\"ok\": true, \"scores\": {\"communication_clarity\": 2, \"relevance\": 2, \"specificity\": 3, \"professionalism\": 2, \"self_awareness\": 2}, \"overall\": 2.2, \"feedback\": \"Heuristic score (LLM unavailable): bas...",
+      "latency_ms": 0.1,
+      "decision": "Scoring the candidate's answer before choosing the next question.",
+      "enforced": false
+    },
+    {
+      "seq": 2,
+      "tool": "search_question_bank",
+      "arguments": {
+        "interview_type": "screening",
+        "exclude_ids": [],
+        "limit": 3
+      },
+      "status": "ok",
+      "result_summary": "{\"ok\": true, \"questions\": [{\"id\": \"scr_1\", \"question\": \"Tell me about yourself.\", \"category\": \"introduction\", \"evaluation_criteria\": [\"relevance\", \"communication\", \"structure\"]}, {\"id\": \"scr_2\", \"q...",
+      "latency_ms": 0.03,
+      "decision": "Answer scored; selecting an unasked question from the bank.",
+      "enforced": false
+    },
+    {
+      "seq": 3,
+      "tool": "save_interview_note",
+      "arguments": {
+        "note": "Answer was structured; probe for specifics next.",
+        "category": "follow_up"
+      },
+      "status": "ok",
+      "result_summary": "{\"ok\": true, \"note_count\": 1}",
+      "latency_ms": 0.01,
+      "decision": "Answer scored; selecting an unasked question from the bank.",
+      "enforced": false
+    }
+  ],
+  "decision_chain": [
+    "[score_answer] Scoring the candidate's answer before choosing the next question.",
+    "[search_question_bank] Answer scored; selecting an unasked question from the bank.",
+    "[save_interview_note] Answer scored; selecting an unasked question from the bank."
+  ],
+  "healed_errors": 0,
+  "score_enforced": false,
+  "used_fallback": false,
+  "notes": [
+    {
+      "category": "follow_up",
+      "note": "Answer was structured; probe for specifics next."
+    }
+  ]
+}
