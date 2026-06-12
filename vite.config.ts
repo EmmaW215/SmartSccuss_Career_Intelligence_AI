@@ -12,8 +12,8 @@ export default defineConfig(({ mode }) => {
       plugins: [react()],
       publicDir: 'Public', // Ensure Public directory is served correctly
       define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+        // SECURITY: never define LLM API keys here — they get baked into the
+        // public bundle. All LLM calls go through the backend (/api/lab/*).
         'process.env.NEXT_PUBLIC_BACKEND_URL': JSON.stringify(env.NEXT_PUBLIC_BACKEND_URL || 'https://smartsccuss-career-intelligence-ai.onrender.com'),
         'process.env.NEXT_PUBLIC_RENDER_BACKEND_URL': JSON.stringify(env.NEXT_PUBLIC_RENDER_BACKEND_URL || 'https://smartsccuss-career-intelligence-ai.onrender.com')
       },
