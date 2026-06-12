@@ -17,3 +17,8 @@ except ImportError:
     customize = None
     dashboard = None
     __all__ = ["health", "screening", "behavioral", "technical", "voice"]
+
+try:
+    from . import lab
+except ImportError:
+    lab = None

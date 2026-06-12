@@ -40,6 +40,15 @@ except ImportError as e:
     matchwise = None
     print(f"⚠️  MatchWise module not loaded: {e}")
 
+# Lab module: Optional (only loaded if dependencies available)
+try:
+    from app.api.routes import lab
+    LAB_AVAILABLE = True
+except ImportError as e:
+    LAB_AVAILABLE = False
+    lab = None
+    print(f"⚠️  Lab module not loaded: {e}")
+
 # Lifespan context manager for startup/shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -146,6 +155,11 @@ if MATCHWISE_AVAILABLE and matchwise:
     app.include_router(matchwise.router)
     print("✅ MatchWise routes (/api/matchwise/*) enabled")
 
+# Lab: Include lab router (only if available)
+if LAB_AVAILABLE and lab:
+    app.include_router(lab.router)
+    print("✅ Lab routes (/api/lab/*) enabled")
+
 # Root endpoint
 @app.get("/")
 async def root():
@@ -159,6 +173,7 @@ async def root():
             "behavioral": "/api/interview/behavioral",
             "technical": "/api/interview/technical",
             "voice": "/api/voice",
+            "lab": "/api/lab",
             "docs": "/docs"
         },
         "phase2_features": {
@@ -169,6 +184,10 @@ async def root():
         "matchwise": {
             "available": MATCHWISE_AVAILABLE,
             "endpoints": "/api/matchwise" if MATCHWISE_AVAILABLE else None
+        },
+        "lab": {
+            "available": LAB_AVAILABLE,
+            "endpoints": "/api/lab" if LAB_AVAILABLE else None
         }
     }
 

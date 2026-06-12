@@ -70,6 +70,19 @@ class Settings(BaseSettings):
     # Phase 2: Session Management (for customize/dashboard features)
     session_timeout_minutes: int = 60
     max_concurrent_sessions: int = 50
+
+    # Phase 1: LangGraph customize flow (feature-flagged)
+    use_langgraph_customize: bool = False
+    langgraph_checkpoint_db: str = "data/checkpoints/customize.sqlite"
+
+    # Phase 2: Agent tooling
+    use_agent_tools: bool = False
+    max_agent_iterations: int = 4
+    agent_model: str = "gpt-4o-mini"
+
+    # Phase 2: Optional MCP transport for tools
+    use_mcp_tools: bool = False
+    mcp_server_url: str = "http://localhost:8000/mcp"
     
     # Voice Configuration
     whisper_model: str = "whisper-1"
