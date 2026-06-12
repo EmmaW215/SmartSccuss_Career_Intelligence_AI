@@ -309,9 +309,11 @@ export async function deleteInterviewSession(
       },
     });
 
-    // For Customize Interview, 404 is acceptable (session may not exist in Phase 2 store)
-    if (!response.ok && type === InterviewType.CUSTOMIZE && response.status === 404) {
-      console.log('Customize session not found (may have been cleaned up)');
+    // 404 on delete is benign for every type: the session is already gone
+    // (expired, cleaned up, or removed by a server restart) — which is the
+    // outcome the delete wanted anyway.
+    if (!response.ok && response.status === 404) {
+      console.log(`Session ${sessionId} already gone (404) — nothing to delete`);
       return;
     }
 

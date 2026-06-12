@@ -71,7 +71,9 @@ class BaseInterviewService(ABC):
     
     def __init__(self, session_store: Optional[Any] = None):
         # FIX: F-A1 (Sprint 1) — Use persistent session store instead of bare dict
-        self.sessions = PersistentSessionStore()
+        # model=InterviewSession rehydrates disk-loaded dicts after a restart;
+        # otherwise attribute access (session.user_id) 500s on reloaded sessions.
+        self.sessions = PersistentSessionStore(model=InterviewSession)
         
         # FIX: A-Q2 (Sprint 2) — Centralized LLM service with fallback chain
         self.llm = get_llm_service()

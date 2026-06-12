@@ -260,7 +260,7 @@ class SessionStore:
             # FIX: F-A1 — Persist completed sessions to disk
             if self._persist and self._disk_store:
                 try:
-                    self._disk_store.save(session)
+                    self._disk_store.save(session_id, session)
                 except Exception:
                     pass  # Disk write failure is non-fatal
 
