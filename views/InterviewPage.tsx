@@ -42,6 +42,8 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
   const [interviewReport, setInterviewReport] = useState<InterviewReport | null>(null);
   const [showReport, setShowReport] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Interview type the current sessionId was created under (for correct cleanup)
+  const sessionTypeRef = useRef<InterviewType>(interviewType);
   
   // Voice mode state
   const [voiceMode, setVoiceMode] = useState(false);
@@ -98,6 +100,7 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
           undefined  // job_description - can be added later
         );
 
+        sessionTypeRef.current = interviewType;
         setSessionId(response.session_id);
         setTotalQuestions(response.max_questions);
         setCurrentQuestionNumber(1);
@@ -140,14 +143,19 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
     });
   }, [isAuthenticated, checkMicrophone]);
 
-  // Cleanup session when component unmounts or interview type changes
+  // Cleanup session when component unmounts or the session is replaced.
+  // Uses the interview type recorded when the session was created —
+  // depending on `interviewType` here paired an old session id with the new
+  // type's endpoint, producing spurious DELETE 404s on every type switch.
   useEffect(() => {
+    const typeAtCreation = sessionTypeRef.current;
     return () => {
+      stopSpeaking();
       if (sessionId) {
-        deleteInterviewSession(interviewType, sessionId).catch(console.error);
+        deleteInterviewSession(typeAtCreation, sessionId).catch(console.error);
       }
     };
-  }, [sessionId, interviewType]);
+  }, [sessionId]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -266,6 +274,7 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
 
     } catch (error: any) {
       console.error("Interview error", error);
+      stopSpeaking();
       setError(error.message || 'Failed to send message. Please try again.');
       
       // Add error message to chat
@@ -381,13 +390,24 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
   };
 
   // Text-to-Speech
+  const stopSpeaking = () => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeaking(false);
+  };
+
   const speak = (text: string) => {
     if (!checkAccess()) return;
 
     if ('speechSynthesis' in window) {
+      // Cancel anything still playing/queued — without this, utterances queue
+      // up and speech keeps going after errors or page navigation.
+      window.speechSynthesis.cancel();
       setIsSpeaking(true);
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
       window.speechSynthesis.speak(utterance);
     }
   };
@@ -422,7 +442,22 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
       }
     } catch (error: any) {
       console.error('Error uploading files:', error);
-      setError(error.message || 'Failed to upload files. Please try again.');
+      const message = String(error?.message || '');
+      if (message.includes('503') || message.toLowerCase().includes('gpu server')) {
+        // Document analysis backend is offline — non-fatal: the interview
+        // works without document personalization, so inform instead of erroring.
+        setShowFileUploader(false);
+        const infoMsg: Message = {
+          id: `upload-skipped-${Date.now()}`,
+          role: 'ai',
+          content:
+            'ℹ️ Document upload is temporarily unavailable, so this interview will run without document personalization. You can still proceed and answer all questions normally.',
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, infoMsg]);
+      } else {
+        setError(message || 'Failed to upload files. Please try again.');
+      }
     } finally {
       setIsUploading(false);
     }
@@ -454,6 +489,7 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
       const userId = user?.id || `user_${Date.now()}`;
       const response = await startInterviewSession(interviewType, userId);
       
+      sessionTypeRef.current = interviewType;
       setSessionId(response.session_id);
       setTotalQuestions(response.max_questions);
       setCurrentQuestionNumber(1);

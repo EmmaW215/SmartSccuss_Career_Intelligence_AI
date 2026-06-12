@@ -33,8 +33,12 @@ class PersistentSessionStore:
     Supports dict-like access: store[session_id], store.get(session_id), etc.
     """
     
-    def __init__(self, session_dir: Optional[Path] = None):
-        self.session_dir = session_dir or SESSION_DIR
+    def __init__(self, session_dir: Optional[Path] = None, model: Optional[type] = None):
+        self.session_dir = Path(session_dir) if session_dir else SESSION_DIR
+        # Pydantic model used to rehydrate dicts loaded from disk back into
+        # objects (e.g. InterviewSession). Without it, sessions read from disk
+        # after a restart stay raw dicts and attribute access crashes callers.
+        self._model = model
         self._cache: Dict[str, Any] = {}
         self._ensure_directory()
         self._load_existing()
@@ -52,21 +56,45 @@ class PersistentSessionStore:
         """Load existing sessions from disk on startup."""
         if not self.session_dir:
             return
-        
+
         loaded = 0
         for f in self.session_dir.glob("*.json"):
             try:
                 with open(f) as fp:
                     data = json.load(fp)
+                session = self._rehydrate(data)
+                if session is None:
+                    logger.warning(f"Skipping non-rehydratable session file {f}")
+                    continue
                 session_id = data.get("session_id", f.stem)
-                self._cache[session_id] = data
+                self._cache[session_id] = session
                 loaded += 1
             except Exception as e:
                 logger.warning(f"Skipping corrupted session file {f}: {e}")
-        
+
         if loaded > 0:
             logger.info(f"Loaded {loaded} existing sessions from disk.")
-    
+
+    def _rehydrate(self, data: Any) -> Optional[Any]:
+        """
+        Convert a raw dict loaded from disk back into a model object.
+
+        Callers (process_message etc.) access attributes like `.user_id`,
+        so serving raw dicts after a restart causes 500s
+        ("'dict' object has no attribute 'user_id'").
+        Returns None when the payload cannot be validated — a missing
+        session (404) is recoverable by the frontend, a crash is not.
+        """
+        if self._model is None or not isinstance(data, dict):
+            return data
+        try:
+            return self._model.model_validate(
+                {k: v for k, v in data.items() if not k.startswith("_")}
+            )
+        except Exception as e:
+            logger.warning(f"Failed to rehydrate session {data.get('session_id')}: {e}")
+            return None
+
     def save(self, session_id: str, session_data: Any):
         """
         Save session to cache and disk.
@@ -109,8 +137,15 @@ class PersistentSessionStore:
                 logger.warning(f"Failed to persist session {session_id} to disk: {e}")
     
     def get(self, session_id: str) -> Optional[Any]:
-        """Get a session by ID."""
-        return self._cache.get(session_id)
+        """Get a session by ID, never serving a raw dict when a model is set."""
+        session = self._cache.get(session_id)
+        if self._model is not None and isinstance(session, dict):
+            session = self._rehydrate(session)
+            if session is None:
+                self._cache.pop(session_id, None)
+                return None
+            self._cache[session_id] = session
+        return session
     
     def delete(self, session_id: str):
         """Delete a session from cache and disk."""
