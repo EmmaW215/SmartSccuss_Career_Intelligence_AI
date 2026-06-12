@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from langchain_core.tools import tool
 
@@ -78,6 +78,53 @@ async def _read_customize_state(session_id: str) -> Any:
     return await GraphCheckpointStateAccessor.read_customize_state(session_id)
 
 
+QUESTION_BANK_COLLECTION = "question_bank"
+
+
+async def _semantic_question_search(
+    query: str, category: str, k: int
+) -> Optional[List[Dict[str, Any]]]:
+    """
+    Phase 3: vector search over the ingested question_bank collection.
+    Returns None when unavailable (flag off, empty collection, no embedding)
+    so the caller can fall back to keyword ranking.
+    """
+    from app.config import settings
+
+    if not getattr(settings, "use_chroma_store", False):
+        return None
+    try:
+        from app.core.embedding_service import EmbeddingService
+        from app.core.vector_store import get_vector_store
+
+        store = get_vector_store()
+        if store.count_documents(QUESTION_BANK_COLLECTION) == 0:
+            return None
+        embedding = await EmbeddingService().embed_text(query)
+        if not embedding or not any(embedding):
+            return None  # embedding provider unavailable -> keyword fallback
+        metadata_filter = (
+            {"category": category} if category in _INTERVIEW_TYPE_CATEGORIES else None
+        )
+        results = store.search(
+            QUESTION_BANK_COLLECTION, embedding, k=k, metadata_filter=metadata_filter
+        )
+        if not results:
+            return None
+        return [
+            {
+                "id": r.document.metadata.get("question_id", r.document.id),
+                "question": r.document.content,
+                "category": r.document.metadata.get("category", "general"),
+                "difficulty": r.document.metadata.get("difficulty", "intermediate"),
+            }
+            for r in results
+        ]
+    except Exception as exc:
+        logger.warning("semantic question search fallback: %s", exc)
+        return None
+
+
 @tool
 async def search_question_bank(
     query: str,
@@ -91,6 +138,12 @@ async def search_question_bank(
     safe_query = _safe_text(query, MAX_QUERY_CHARS)
     safe_category = _safe_text(category, 64).lower() or "general"
     safe_k = _safe_k(k)
+
+    # Phase 3: semantic search via the vector-store factory when enabled.
+    semantic = await _semantic_question_search(safe_query, safe_category, safe_k)
+    if semantic is not None:
+        return semantic
+
     try:
         banks = load_all_question_banks()
         if safe_category in _INTERVIEW_TYPE_CATEGORIES:
@@ -141,6 +194,17 @@ async def fetch_resume_context(
     safe_k = _safe_k(k)
     if not safe_user_id or not safe_query:
         return []
+
+    # Phase 3: locally-built collections (upload dual mode) are queried first —
+    # this is also the only path that works when the GPU server is offline.
+    try:
+        from app.rag.local_rag import query_local_rag
+
+        local_snippets = await query_local_rag(safe_user_id, safe_query, k=safe_k)
+        if local_snippets:
+            return local_snippets
+    except Exception as exc:
+        logger.warning("fetch_resume_context local path fallback: %s", exc)
 
     try:
         gpu_client = get_gpu_client()

@@ -10,7 +10,7 @@ Features:
 """
 
 import numpy as np
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Protocol, runtime_checkable
 from dataclasses import dataclass, field
 from datetime import datetime
 import uuid
@@ -32,6 +32,53 @@ class SearchResult:
     document: VectorDocument
     score: float  # Similarity score (0-1, higher is better)
     distance: float  # Distance (0-2, lower is better)
+
+
+@runtime_checkable
+class VectorStoreProtocol(Protocol):
+    """
+    Phase 3 — public surface every vector store implementation must provide.
+    Extracted from the NumPy VectorStore below; ChromaVectorStore
+    (app/rag/chroma_store.py) implements the same contract.
+    """
+
+    def create_collection(self, collection_id: str) -> None: ...
+
+    def delete_collection(self, collection_id: str) -> bool: ...
+
+    def add_document(
+        self,
+        collection_id: str,
+        content: str,
+        embedding: List[float],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str: ...
+
+    def add_documents(
+        self, collection_id: str, documents: List[Dict[str, Any]]
+    ) -> List[str]: ...
+
+    def search(
+        self,
+        collection_id: str,
+        query_embedding: List[float],
+        k: int = 5,
+        metadata_filter: Optional[Dict[str, Any]] = None,
+    ) -> List[SearchResult]: ...
+
+    def get_document(
+        self, collection_id: str, document_id: str
+    ) -> Optional[VectorDocument]: ...
+
+    def get_all_documents(
+        self,
+        collection_id: str,
+        metadata_filter: Optional[Dict[str, Any]] = None,
+    ) -> List[VectorDocument]: ...
+
+    def count_documents(self, collection_id: str) -> int: ...
+
+    def clear_all(self) -> None: ...
 
 
 class VectorStore:
@@ -246,12 +293,41 @@ class VectorStore:
 
 
 # Singleton instance for shared use
-_vector_store_instance: Optional[VectorStore] = None
+_vector_store_instance: Optional[Any] = None
 
 
-def get_vector_store() -> VectorStore:
-    """Get the singleton vector store instance"""
+def get_vector_store() -> "VectorStoreProtocol":
+    """
+    Factory for the platform vector store (Phase 3).
+
+    USE_CHROMA_STORE=true -> persistent ChromaVectorStore
+    (falls back to NumPy with a warning if chromadb is unavailable);
+    default -> in-memory NumPy VectorStore, byte-for-byte Phase 1 behavior.
+    """
     global _vector_store_instance
     if _vector_store_instance is None:
-        _vector_store_instance = VectorStore()
+        from app.config import settings
+
+        if getattr(settings, "use_chroma_store", False):
+            try:
+                from app.rag.chroma_store import ChromaVectorStore
+
+                _vector_store_instance = ChromaVectorStore()
+            except Exception as exc:
+                import logging
+
+                logging.getLogger(__name__).error(
+                    "USE_CHROMA_STORE=true but Chroma init failed (%s); "
+                    "falling back to in-memory NumPy store",
+                    exc,
+                )
+                _vector_store_instance = VectorStore()
+        else:
+            _vector_store_instance = VectorStore()
     return _vector_store_instance
+
+
+def reset_vector_store_singleton() -> None:
+    """Testing/flag-flip helper: next get_vector_store() re-reads the flag."""
+    global _vector_store_instance
+    _vector_store_instance = None
