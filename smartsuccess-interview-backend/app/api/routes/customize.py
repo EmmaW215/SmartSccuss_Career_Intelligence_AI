@@ -9,10 +9,17 @@ continue to work without GPU server.
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
 from pydantic import BaseModel
+import logging
 
 from app.config import settings
 from app.services.gpu_client import get_gpu_client
 from app.core.conversation_engine import get_conversation_engine
+from app.graph.customize_graph import (
+    respond_customize_with_graph,
+    start_customize_with_graph,
+)
+from app.graph.checkpoint_store_adapter import CheckpointStoreAdapter
+from app.graph.checkpoint_state_accessor import GraphCheckpointStateAccessor
 from app.services.session_store import SessionStore, InterviewStatus
 from app.rag.question_bank import select_customize_questions
 
@@ -21,6 +28,8 @@ router = APIRouter(
     prefix="/api/interview/customize",
     tags=["customize"]
 )
+logger = logging.getLogger(__name__)
+MAX_UPLOAD_FILE_SIZE = 10 * 1024 * 1024
 
 
 class StartCustomInterviewRequest(BaseModel):
@@ -61,10 +70,10 @@ async def upload_documents(
     # Process uploaded files
     processed_files = []
     for file in files:
-        content = await file.read()
+        content = await file.read(MAX_UPLOAD_FILE_SIZE + 1)
         
         # Validate file size (max 10MB)
-        if len(content) > 10 * 1024 * 1024:
+        if len(content) > MAX_UPLOAD_FILE_SIZE:
             raise HTTPException(
                 status_code=400,
                 detail=f"File {file.filename} exceeds 10MB limit"
@@ -77,7 +86,12 @@ async def upload_documents(
         if content_type.startswith("text/") or (file.filename and file.filename.endswith(('.txt', '.md'))):
             try:
                 text_content = content.decode('utf-8')
-            except:
+            except UnicodeDecodeError:
+                logger.warning(
+                    "Customize upload fallback decode to latin-1: filename=%s content_type=%s",
+                    file.filename,
+                    content_type,
+                )
                 text_content = content.decode('latin-1')
             processed_files.append({
                 "filename": file.filename or "unknown.txt",
@@ -108,9 +122,10 @@ async def upload_documents(
             "rag_id": rag_result.get("rag_id")
         }
     except Exception as e:
+        logger.error("Failed to build custom RAG for user_id=%s: %s", user_id, e, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to build custom RAG: {str(e)}"
+            detail="Failed to process uploaded documents for custom interview."
         )
 
 
@@ -127,14 +142,7 @@ async def start_customize_interview(
             status_code=503,
             detail="Custom interview feature requires Phase 2 session store. Please ensure Phase 2 features are enabled."
         )
-    
-    conversation_engine = get_conversation_engine()
-    if not conversation_engine:
-        raise HTTPException(
-            status_code=503,
-            detail="Conversation engine not available. Please enable use_conversation_engine in config."
-        )
-    
+
     gpu_client = get_gpu_client()
     
     # Check GPU availability
@@ -153,34 +161,61 @@ async def start_customize_interview(
         custom_profile=None,  # Can be set after file upload
         custom_rag_id=None
     )
-    
-    context = conversation_engine.create_context(
-        session_id=session.session_id,
-        user_id=body.user_id,
-        interview_type="customize",
-        user_profile=None,
-        job_context=job_context
-    )
-    
-    greeting = await conversation_engine.generate_greeting(
-        context=context,
-        user_name=body.user_name
-    )
+
+    if settings.use_langgraph_customize:
+        try:
+            graph_state = await start_customize_with_graph(
+                user_id=body.user_id,
+                user_name=body.user_name,
+                questions=questions,
+                session_id=session.session_id,
+                user_profile=None,
+            )
+            greeting = graph_state.get("ai_response") or "Welcome! Let's start your customized interview."
+        except Exception as exc:
+            logger.error(
+                "LangGraph customize start failed for session_id=%s: %s",
+                session.session_id,
+                exc,
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Customize interview service temporarily unavailable.",
+            )
+    else:
+        conversation_engine = get_conversation_engine()
+        if not conversation_engine:
+            raise HTTPException(
+                status_code=503,
+                detail="Conversation engine not available. Please enable use_conversation_engine in config."
+            )
+
+        context = conversation_engine.create_context(
+            session_id=session.session_id,
+            user_id=body.user_id,
+            interview_type="customize",
+            user_profile=None,
+            job_context=job_context
+        )
+
+        greeting = await conversation_engine.generate_greeting(
+            context=context,
+            user_name=body.user_name
+        )
     
     session_store.update_session(
         session.session_id,
         status=InterviewStatus.IN_PROGRESS
     )
     
-    return {
-        "session_id": session.session_id,
-        "greeting": greeting,
-        "total_questions": len(questions),
-        "voice_enabled": session.voice_enabled,
-        "interview_type": "customize",
-        "profile_used": False,
-        "gpu_available": status.get("available", False)
-    }
+    return CheckpointStoreAdapter.start_response(
+        session_id=session.session_id,
+        greeting=greeting,
+        total_questions=len(questions),
+        voice_enabled=session.voice_enabled,
+        gpu_available=status.get("available", False),
+    )
 
 
 @router.post("/respond")
@@ -193,10 +228,6 @@ async def submit_response(
     if session_store is None:  # BUGFIX: use identity check, not truthiness
         raise HTTPException(status_code=503, detail="Session store not available")
     
-    conversation_engine = get_conversation_engine()
-    if not conversation_engine:
-        raise HTTPException(status_code=503, detail="Conversation engine not available")
-    
     session = session_store.get_session(body.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -206,11 +237,46 @@ async def submit_response(
     
     if session.status != InterviewStatus.IN_PROGRESS:
         raise HTTPException(status_code=400, detail="Interview not in progress")
-    
+
+    if settings.use_langgraph_customize:
+        try:
+            graph_state = await respond_customize_with_graph(
+                session_id=body.session_id,
+                user_response=body.user_response,
+            )
+            checkpoint_state = await GraphCheckpointStateAccessor.read_customize_state(
+                body.session_id
+            )
+            if checkpoint_state:
+                graph_state = checkpoint_state
+        except Exception as exc:
+            logger.error(
+                "LangGraph customize respond failed for session_id=%s: %s",
+                body.session_id,
+                exc,
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Customize interview service temporarily unavailable.",
+            )
+
+        return CheckpointStoreAdapter.respond_response(
+            session_store=session_store,
+            session=session,
+            session_id=body.session_id,
+            user_response=body.user_response,
+            graph_state=graph_state,
+        )
+
+    conversation_engine = get_conversation_engine()
+    if not conversation_engine:
+        raise HTTPException(status_code=503, detail="Conversation engine not available")
+
     context = conversation_engine.get_context(body.session_id)
     if not context:
         raise HTTPException(status_code=404, detail="Conversation context not found")
-    
+
     if session.current_question_index >= len(session.questions):
         closing = await conversation_engine.generate_closing(context)
         session_store.complete_session(body.session_id)
@@ -219,16 +285,16 @@ async def submit_response(
             "is_complete": True,
             "session_id": body.session_id
         }
-    
+
     next_q = session.questions[session.current_question_index]
     next_question = next_q.get("customized_question") or next_q.get("question", "Tell me more.")
-    
+
     result = await conversation_engine.process_response(
         context=context,
         user_response=body.user_response,
         next_question=next_question
     )
-    
+
     # Check if user requested to end interview early
     if result.get("is_complete") or result.get("should_end"):
         closing = result.get("ai_response") or await conversation_engine.generate_closing(context)
@@ -239,7 +305,7 @@ async def submit_response(
             "feedback_hint": result.get("feedback_hint"),
             "session_id": body.session_id
         }
-    
+
     session_store.add_response(
         session_id=body.session_id,
         question_index=session.current_question_index,
@@ -247,9 +313,9 @@ async def submit_response(
         ai_response=result["ai_response"],
         feedback_hint=result.get("feedback_hint")
     )
-    
+
     is_complete = result["question_index"] >= len(session.questions)
-    
+
     if is_complete:
         closing = await conversation_engine.generate_closing(context)
         session_store.complete_session(body.session_id)
@@ -259,11 +325,11 @@ async def submit_response(
             "feedback_hint": result.get("feedback_hint"),
             "session_id": body.session_id
         }
-    
+
     # Get category of current question
     current_q = session.questions[result["question_index"]] if result["question_index"] < len(session.questions) else None
     category = current_q.get("category", "general") if current_q else None
-    
+
     return {
         "ai_response": result["ai_response"],
         "tone": result.get("tone", "neutral"),

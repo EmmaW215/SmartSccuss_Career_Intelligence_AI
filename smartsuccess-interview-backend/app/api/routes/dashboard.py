@@ -5,11 +5,13 @@ User interview history and statistics
 Note: This is an optional feature. Only works when Phase 2 session store is enabled.
 """
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from app.config import settings
+from app.graph.checkpoint_state_accessor import GraphCheckpointStateAccessor
 from app.services.session_store import InterviewStatus, SessionStore
 from app.services.session_adapter import convert_base_session_to_store
 
@@ -32,6 +34,86 @@ router = APIRouter(
 def get_session_store(request: Request) -> Optional[SessionStore]:
     """Get session store from app state (if available)"""
     return getattr(request.app.state, 'session_store', None)
+
+
+async def _get_customize_graph_overlay(session) -> Dict[str, Any]:
+    """
+    Build read-only overlay from graph checkpoint for customize sessions.
+    Does not mutate SessionStore session objects.
+    """
+    overlay: Dict[str, Any] = {}
+    if not getattr(settings, "use_langgraph_customize", False):
+        return overlay
+    if getattr(session, "interview_type", None) != "customize":
+        return overlay
+
+    state = await GraphCheckpointStateAccessor.read_customize_state(
+        getattr(session, "session_id", "")
+    )
+    if not state:
+        return overlay
+
+    graph_idx = state.get("current_question_index")
+    if isinstance(graph_idx, int):
+        overlay["current_question_index"] = graph_idx
+
+    if bool(state.get("is_complete", False)):
+        overlay["status"] = InterviewStatus.COMPLETED
+        overlay["completed_at"] = session.completed_at or datetime.now()
+
+    evaluation = state.get("last_evaluation") or {}
+    hint = evaluation.get("hint")
+    quality = evaluation.get("quality")
+    if hint or quality:
+        new_hint: Dict[str, str] = {}
+        if hint:
+            new_hint["hint"] = hint
+        if quality:
+            new_hint["quality"] = quality
+        if new_hint:
+            overlay["extra_hint"] = new_hint
+    return overlay
+
+
+def _effective_status(session, overlay: Optional[Dict[str, Any]]) -> InterviewStatus:
+    return (
+        overlay.get("status")
+        if overlay and overlay.get("status") is not None
+        else session.status
+    )
+
+
+def _effective_completed_at(session, overlay: Optional[Dict[str, Any]]):
+    if overlay and overlay.get("completed_at") is not None:
+        return overlay["completed_at"]
+    return session.completed_at
+
+
+def _effective_feedback_hints(session, overlay: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    hints = list(session.feedback_hints or [])
+    if overlay and overlay.get("extra_hint"):
+        extra_hint = overlay["extra_hint"]
+        if extra_hint not in hints:
+            hints.append(extra_hint)
+    return hints
+
+
+def _effective_question_index(session, overlay: Optional[Dict[str, Any]]) -> int:
+    if overlay and isinstance(overlay.get("current_question_index"), int):
+        return overlay["current_question_index"]
+    return int(getattr(session, "current_question_index", 0) or 0)
+
+
+def _questions_answered_count(session, question_index_override: Optional[int] = None) -> int:
+    """
+    Stable answered-count metric across legacy and graph paths.
+    """
+    responses_count = len(getattr(session, "responses", []) or [])
+    if question_index_override is None:
+        question_index = int(getattr(session, "current_question_index", 0) or 0)
+    else:
+        question_index = int(question_index_override or 0)
+    return max(responses_count, question_index)
 
 
 @router.get("/history/{user_id}")
@@ -64,15 +146,20 @@ async def get_interview_history(
         )
         
         for session in sessions:
+            overlay = await _get_customize_graph_overlay(session)
+            status_value = _effective_status(session, overlay)
+            completed_at = _effective_completed_at(session, overlay)
             history.append({
                 "session_id": session.session_id,
                 "interview_type": session.interview_type,
-                "status": session.status.value,
-                "questions_answered": len(session.responses),
+                "status": status_value.value,
+                "questions_answered": _questions_answered_count(
+                    session, _effective_question_index(session, overlay)
+                ),
                 "total_questions": len(session.questions),
                 "voice_enabled": session.voice_enabled,
                 "created_at": session.created_at.isoformat(),
-                "completed_at": session.completed_at.isoformat() if session.completed_at else None
+                "completed_at": completed_at.isoformat() if completed_at else None
             })
     
     # Also get from BaseInterviewService if available
@@ -150,8 +237,11 @@ async def get_user_stats(
     all_sessions_list = []
     
     # Get from SessionStore if available
+    overlay_by_session_id: Dict[str, Dict[str, Any]] = {}
     if session_store is not None:  # BUGFIX: identity check
         store_sessions = session_store.get_user_sessions(user_id=user_id, limit=100)
+        for session in store_sessions:
+            overlay_by_session_id[session.session_id] = await _get_customize_graph_overlay(session)
         all_sessions_list.extend(store_sessions)
     
     # Also get from BaseInterviewService if available
@@ -232,7 +322,12 @@ async def get_user_stats(
                 print(f"Error getting stats from service: {e}")
                 continue
     
-    completed = [s for s in all_sessions_list if s.status == InterviewStatus.COMPLETED]
+    completed = [
+        s
+        for s in all_sessions_list
+        if _effective_status(s, overlay_by_session_id.get(s.session_id))
+        == InterviewStatus.COMPLETED
+    ]
     
     by_type = {}
     for session in all_sessions_list:
@@ -240,14 +335,24 @@ async def get_user_stats(
         if itype not in by_type:
             by_type[itype] = {"total": 0, "completed": 0}
         by_type[itype]["total"] += 1
-        if session.status == InterviewStatus.COMPLETED:
+        if (
+            _effective_status(session, overlay_by_session_id.get(session.session_id))
+            == InterviewStatus.COMPLETED
+        ):
             by_type[itype]["completed"] += 1
     
     return {
         "user_id": user_id,
         "total_interviews": len(all_sessions_list),
         "completed_interviews": len(completed),
-        "in_progress": len([s for s in all_sessions_list if s.status == InterviewStatus.IN_PROGRESS]),
+        "in_progress": len(
+            [
+                s
+                for s in all_sessions_list
+                if _effective_status(s, overlay_by_session_id.get(s.session_id))
+                == InterviewStatus.IN_PROGRESS
+            ]
+        ),
         "by_type": by_type,
         "completion_rate": len(completed) / len(all_sessions_list) * 100 if all_sessions_list else 0
     }
@@ -266,16 +371,21 @@ async def get_session_feedback(
     session = session_store.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    overlay = await _get_customize_graph_overlay(session)
+    status_value = _effective_status(session, overlay)
+    feedback_hints = _effective_feedback_hints(session, overlay)
     
     # Compile feedback from session
     feedback = {
         "session_id": session_id,
         "interview_type": session.interview_type,
-        "status": session.status.value,
-        "questions_answered": len(session.responses),
+        "status": status_value.value,
+        "questions_answered": _questions_answered_count(
+            session, _effective_question_index(session, overlay)
+        ),
         "total_questions": len(session.questions),
         "responses": [],
-        "feedback_hints": session.feedback_hints
+        "feedback_hints": feedback_hints
     }
     
     for i, response in enumerate(session.responses):
@@ -287,11 +397,11 @@ async def get_session_feedback(
         })
     
     # Calculate simple scores based on hints
-    good_count = sum(1 for h in session.feedback_hints if h.get("quality") == "good")
-    fair_count = sum(1 for h in session.feedback_hints if h.get("quality") == "fair")
-    needs_improvement = sum(1 for h in session.feedback_hints if h.get("quality") == "needs_improvement")
+    good_count = sum(1 for h in feedback_hints if h.get("quality") == "good")
+    fair_count = sum(1 for h in feedback_hints if h.get("quality") == "fair")
+    needs_improvement = sum(1 for h in feedback_hints if h.get("quality") == "needs_improvement")
     
-    total_hints = len(session.feedback_hints)
+    total_hints = len(feedback_hints)
     if total_hints > 0:
         feedback["estimated_score"] = {
             "good_responses": good_count,
@@ -436,16 +546,20 @@ async def generate_interview_report(
                 "suggestion": "Please complete a new interview to generate a report."
             }
         )
+    overlay = await _get_customize_graph_overlay(session)
+    status_value = _effective_status(session, overlay)
+    effective_completed_at = _effective_completed_at(session, overlay)
+    feedback_hints = _effective_feedback_hints(session, overlay)
     
     # Check if completed
-    if session.status != InterviewStatus.COMPLETED:
+    if status_value != InterviewStatus.COMPLETED:
         raise HTTPException(
             status_code=400, 
             detail={
                 "error": "Interview not completed",
                 "message": "Report can only be generated for completed interviews",
                 "session_id": session_id,
-                "current_status": session.status.value
+                "current_status": status_value.value
             }
         )
     
@@ -454,9 +568,11 @@ async def generate_interview_report(
         "session_id": session_id,
         "user_id": session.user_id,
         "interview_type": session.interview_type,
-        "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+        "completed_at": effective_completed_at.isoformat() if effective_completed_at else None,
         "duration_minutes": None,
-        "questions_answered": len(session.responses),
+        "questions_answered": _questions_answered_count(
+            session, _effective_question_index(session, overlay)
+        ),
         "total_questions": len(session.questions),
         "conversation_history": [],
         "responses_summary": [],
@@ -472,8 +588,8 @@ async def generate_interview_report(
     }
     
     # Calculate duration
-    if session.created_at and session.completed_at:
-        duration = (session.completed_at - session.created_at).total_seconds() / 60
+    if session.created_at and effective_completed_at:
+        duration = (effective_completed_at - session.created_at).total_seconds() / 60
         report["duration_minutes"] = round(duration, 1)
     
     # Build conversation history
@@ -499,11 +615,11 @@ async def generate_interview_report(
         })
     
     # Analyze feedback hints
-    good_count = sum(1 for h in session.feedback_hints if h.get("quality") == "good")
-    fair_count = sum(1 for h in session.feedback_hints if h.get("quality") == "fair")
-    needs_improvement = sum(1 for h in session.feedback_hints if h.get("quality") == "needs_improvement")
+    good_count = sum(1 for h in feedback_hints if h.get("quality") == "good")
+    fair_count = sum(1 for h in feedback_hints if h.get("quality") == "fair")
+    needs_improvement = sum(1 for h in feedback_hints if h.get("quality") == "needs_improvement")
     
-    total_hints = len(session.feedback_hints)
+    total_hints = len(feedback_hints)
     if total_hints > 0:
         overall_score = round((good_count * 100 + fair_count * 70 + needs_improvement * 40) / total_hints, 1)
         report["feedback_analysis"] = {
@@ -522,7 +638,7 @@ async def generate_interview_report(
             report["recommendations"].append("Consider preparing STAR method responses for behavioral questions")
         
         # Extract strengths and improvements from feedback hints
-        for hint in session.feedback_hints:
+        for hint in feedback_hints:
             hint_text = hint.get("hint", "")
             if hint.get("quality") == "good" and hint_text:
                 report["strengths"].append(hint_text)
