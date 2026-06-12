@@ -530,7 +530,7 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
   const handleVoicePanelComplete = (transcript: any[]) => {
     setIsInterviewComplete(true);
     setVoiceMode(false); // Switch back to text mode to show report
-    
+
     // Fetch report
     if (sessionId) {
       getInterviewReport(sessionId)
@@ -540,7 +540,21 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
         })
         .catch(err => {
           console.error('Failed to fetch report:', err);
-          setError('Failed to generate report. Check your dashboard for results.');
+          const message = String(err?.message || '');
+          if (message.includes('Interview not completed') || message.includes('400')) {
+            // Ended before the backend marked the session complete —
+            // an informational note, not an error.
+            const infoMsg: Message = {
+              id: `ended-early-${Date.now()}`,
+              role: 'ai',
+              content:
+                'The interview ended before completion, so no report was generated. Finish all questions (or say "stop" to wrap up) to receive your full feedback report.',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, infoMsg]);
+          } else {
+            setError('Failed to generate report. Check your dashboard for results.');
+          }
         });
     }
   };

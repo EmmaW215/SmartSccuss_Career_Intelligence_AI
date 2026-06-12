@@ -247,7 +247,9 @@ def _extract_tool_log_and_verdict(messages: List[Any]) -> Tuple[List[Dict[str, A
         tool_name = pending.get("tool") or getattr(msg, "name", None) or "unknown"
         args = pending.get("args", {})
         content = getattr(msg, "content", "")
-        parsed_content = extract_json_from_llm(str(content))
+        # silent: tool outputs are often legitimate plain text (e.g. a
+        # follow-up question from generate_followup) — not parse failures.
+        parsed_content = extract_json_from_llm(str(content), silent=True)
         if tool_name == "score_answer" and isinstance(parsed_content, dict):
             latest_verdict = parsed_content
         _append_tool_call_log(
