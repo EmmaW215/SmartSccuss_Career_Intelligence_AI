@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ViewState, InterviewType, LabViewState, LabChallenge } from './types';
+import { ViewState, InterviewType, LabViewState, LabChallenge, AssessmentResult } from './types';
 import { Sidebar } from './components/Sidebar';
 import { LandingPage } from './views/LandingPage';
 import { InterviewPage } from './views/InterviewPage';
@@ -12,7 +12,6 @@ import { SampleAnalysisPage } from './views/SampleAnalysisPage';
 import MatchwiseApp from './views/matchwise/MatchwiseApp';
 import { AuthProvider } from './contexts/AuthContext';
 import { AccessModals } from './components/AccessModals';
-import { LAB_MOCK_RESULTS } from './constants/labChallenges';
 
 function AppContent() {
   const [currentView, setCurrentView] = useState<ViewState>('landing');
@@ -21,6 +20,8 @@ function AppContent() {
   const [labView, setLabView] = useState<LabViewState>('lab-dashboard');
   const [activeChallenge, setActiveChallenge] = useState<LabChallenge | null>(null);
   const [completedChallenges, setCompletedChallenges] = useState<string[]>([]);
+  // Real evaluation result from /api/lab/evaluate (replaces LAB_MOCK_RESULTS)
+  const [labResult, setLabResult] = useState<AssessmentResult | null>(null);
 
   const handleNavigate = (view: ViewState) => {
     setCurrentView(view);
@@ -98,20 +99,22 @@ function AppContent() {
                   setLabView('lab-dashboard');
                   setActiveChallenge(null);
                 }}
-                onSubmit={() => {
+                onSubmit={(result) => {
                   if (activeChallenge) {
                     setCompletedChallenges(prev => [...new Set([...prev, activeChallenge.id])]);
                   }
+                  setLabResult(result);
                   setLabView('lab-results');
                 }}
               />
             )}
-            {labView === 'lab-results' && (
-              <LabResultsView 
-                result={LAB_MOCK_RESULTS as any}
+            {labView === 'lab-results' && labResult && (
+              <LabResultsView
+                result={labResult}
                 onHome={() => {
                   setLabView('lab-dashboard');
                   setActiveChallenge(null);
+                  setLabResult(null);
                 }}
               />
             )}

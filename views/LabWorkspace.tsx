@@ -12,14 +12,14 @@ import {
   Clock,
   Sparkles
 } from 'lucide-react';
-import { LabChallenge, LabFileNode, LabChatMessage } from '../types';
-import { generateLabAIResponse } from '../services/geminiService';
+import { AssessmentResult, LabChallenge, LabFileNode, LabChatMessage } from '../types';
+import { evaluateLabSubmission, generateLabResponse } from '../services/labService';
 import { useAuth } from '../contexts/AuthContext';
 
 interface LabWorkspaceProps {
   challenge: LabChallenge;
   onExit: () => void;
-  onSubmit: () => void;
+  onSubmit: (result: AssessmentResult) => void;
 }
 
 export const LabWorkspace: React.FC<LabWorkspaceProps> = ({ challenge, onExit, onSubmit }) => {
@@ -37,8 +37,9 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({ challenge, onExit, o
   ]);
   const [inputMessage, setInputMessage] = useState('');
   const [isAiThinking, setIsAiThinking] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [timeLeft, setTimeLeft] = useState(challenge.timeLimit * 60);
-  const { isPro } = useAuth();
+  const { user, isPro } = useAuth();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -82,10 +83,11 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({ challenge, onExit, o
     setInputMessage('');
     setIsAiThinking(true);
 
-    // Call Lab Gemini Service
-    const aiResponseText = await generateLabAIResponse(
-      [...messages, userMsg].map(m => ({ role: m.role, content: m.content })),
-      `You are an expert AI Architect and Engineering assistant helping a user with the task: "${challenge.title}". The context is: ${challenge.description}. Be concise, helpful, and technical.`
+    // Call the backend Lab proxy (no client-side LLM key)
+    const aiResponseText = await generateLabResponse(
+      user?.id || 'anonymous',
+      { id: challenge.id, title: challenge.title, description: challenge.description },
+      [...messages, userMsg].map(m => ({ role: m.role, content: m.content }))
     );
 
     const aiMsg: LabChatMessage = {
@@ -101,6 +103,22 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({ challenge, onExit, o
 
   const handleRunCode = () => {
     setTerminalOutput(prev => [...prev, `> python ${activeFile.name}`, `> Running simulation...`, `> OK.`]);
+  };
+
+  const handleSubmit = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setTerminalOutput(prev => [...prev, '> Submitting solution for evaluation...']);
+    try {
+      const result = await evaluateLabSubmission(
+        user?.id || 'anonymous',
+        { id: challenge.id, title: challenge.title, description: challenge.description },
+        files.map(f => ({ name: f.name, content: f.content }))
+      );
+      onSubmit(result);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -134,8 +152,13 @@ export const LabWorkspace: React.FC<LabWorkspaceProps> = ({ challenge, onExit, o
           <button onClick={handleRunCode} className="flex items-center gap-2 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-md text-sm font-medium transition-colors text-green-400">
             <Play size={14} /> Run
           </button>
-          <button onClick={onSubmit} className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 rounded-md text-sm font-medium transition-colors text-white ml-2">
-            <Save size={14} /> Submit
+          <button
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+            className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-60 disabled:cursor-not-allowed rounded-md text-sm font-medium transition-colors text-white ml-2"
+          >
+            {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            {isSubmitting ? 'Evaluating…' : 'Submit'}
           </button>
         </div>
       </div>
