@@ -38,13 +38,22 @@ def convert_base_session_to_store(
         "screening"
     )
     
-    # Map phase to status
+    # Map phase to status.
+    # InterviewSession uses `use_enum_values=True`, so `phase` is a plain
+    # string ("in_progress") — an enum-keyed map never matches and every
+    # session mirrors as PENDING, which blocks report generation forever.
+    phase_value = (
+        base_session.phase.value
+        if hasattr(base_session.phase, "value")
+        else str(base_session.phase)
+    ).lower()
     status_map = {
-        InterviewPhase.GREETING: InterviewStatus.PENDING,
-        InterviewPhase.IN_PROGRESS: InterviewStatus.IN_PROGRESS,
-        InterviewPhase.COMPLETED: InterviewStatus.COMPLETED
+        InterviewPhase.NOT_STARTED.value: InterviewStatus.PENDING,
+        InterviewPhase.GREETING.value: InterviewStatus.PENDING,
+        InterviewPhase.IN_PROGRESS.value: InterviewStatus.IN_PROGRESS,
+        InterviewPhase.COMPLETED.value: InterviewStatus.COMPLETED,
     }
-    status = status_map.get(base_session.phase, InterviewStatus.PENDING)
+    status = status_map.get(phase_value, InterviewStatus.PENDING)
     
     # Convert questions
     questions = []

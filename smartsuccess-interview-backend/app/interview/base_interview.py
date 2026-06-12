@@ -237,6 +237,17 @@ class BaseInterviewService(ABC):
                 message="You're sending messages too quickly. Please wait a moment."
             )
         
+        # End-intent must be checked BEFORE input validation: "stop" is only
+        # 4 chars and the min-length rule would otherwise swallow it, leaving
+        # the interview permanently incomplete (report 400).
+        if self._is_end_intent(user_message) and session.phase in (
+            InterviewPhase.GREETING,
+            InterviewPhase.IN_PROGRESS,
+        ):
+            result = await self._complete_interview(session)
+            self._persist_session(session)
+            return result
+
         # FIX: A-Q7 (Sprint 5) — Input validation
         is_valid, guidance = validate_response(user_message)
         if not is_valid:
@@ -318,6 +329,22 @@ class BaseInterviewService(ABC):
             evaluation=evaluation
         )
     
+    # Bare control words must match exactly; phrases may appear anywhere.
+    # (The old substring check fired on words like "recommend" containing "end".)
+    _END_INTENT_WORDS = {"stop", "end", "finish", "done", "quit", "exit"}
+    _END_INTENT_PHRASES = (
+        "that's all", "that is all", "i'm done", "i am done",
+        "i want to stop", "i want to end", "stop the interview",
+        "end the interview", "finish the interview", "end interview",
+    )
+
+    def _is_end_intent(self, user_message: str) -> bool:
+        """Detect an explicit request to end the interview early."""
+        lowered = user_message.lower().strip().rstrip(".!?")
+        if lowered in self._END_INTENT_WORDS:
+            return True
+        return any(phrase in lowered for phrase in self._END_INTENT_PHRASES)
+
     async def _handle_interview_response(
         self,
         session: InterviewSession,
@@ -325,12 +352,7 @@ class BaseInterviewService(ABC):
     ) -> MessageResponse:
         """Handle responses during the interview"""
         # Check if user wants to end interview early
-        user_lower = user_message.lower().strip()
-        end_keywords = [
-            'stop', 'end', 'finish', 'done', "that's all", 'that is all',
-            "i'm done", 'i am done', 'i want to stop', 'i want to end'
-        ]
-        if any(keyword in user_lower for keyword in end_keywords):
+        if self._is_end_intent(user_message):
             return await self._complete_interview(session)
         
         # Evaluate the response

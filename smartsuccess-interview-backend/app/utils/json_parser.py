@@ -14,16 +14,23 @@ from typing import Optional, Dict, Any
 logger = logging.getLogger(__name__)
 
 
-def extract_json_from_llm(response_text: str) -> Optional[Dict[str, Any]]:
+def extract_json_from_llm(
+    response_text: str, silent: bool = False
+) -> Optional[Dict[str, Any]]:
     """
     Robustly extract JSON from LLM responses.
-    
+
     Attempts multiple extraction strategies in order of reliability:
     1. Direct parse (cleanest case)
     2. Extract from ```json ... ``` fenced blocks
     3. Find first balanced { ... } or [ ... ] block
     4. Repair common JSON issues and retry
-    
+    5. Close braces on truncated output (max_tokens cutoffs)
+
+    Args:
+        silent: suppress the failure warning — for callers probing content
+                that is frequently legitimate non-JSON text.
+
     Returns:
         Parsed JSON dict/list, or None if all strategies fail.
     """
@@ -93,8 +100,67 @@ def extract_json_from_llm(response_text: str) -> Optional[Dict[str, Any]]:
             return json.loads(repaired)
         except json.JSONDecodeError:
             pass
-    
-    logger.warning(f"JSON extraction failed. Response preview: {text[:200]}...")
+
+    # Strategy 5: Truncated output (max_tokens cutoff) — drop the trailing
+    # incomplete fragment and close any unbalanced braces/brackets.
+    recovered = _repair_truncated_json(text)
+    if recovered is not None:
+        return recovered
+
+    if not silent:
+        logger.warning(f"JSON extraction failed. Response preview: {text[:200]}...")
+    return None
+
+
+def _repair_truncated_json(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Best-effort recovery of JSON cut off mid-stream by a token limit.
+
+    Strips markdown fences, then progressively trims back to the last comma
+    and appends the closing brackets implied by the unclosed nesting stack.
+    """
+    cleaned = re.sub(r"```(?:json)?", "", text).strip()
+    start = cleaned.find("{")
+    if start == -1:
+        return None
+    fragment = cleaned[start:]
+
+    for _ in range(20):
+        stack = []
+        in_string = False
+        escape_next = False
+        for char in fragment:
+            if escape_next:
+                escape_next = False
+                continue
+            if char == "\\":
+                escape_next = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if char in "{[":
+                stack.append("}" if char == "{" else "]")
+            elif char in "}]" and stack:
+                stack.pop()
+
+        candidate = fragment
+        if in_string:
+            candidate += '"'
+        candidate = candidate.rstrip().rstrip(",")
+        candidate += "".join(reversed(stack))
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict) and parsed:
+                return parsed
+            return None
+        except json.JSONDecodeError:
+            last_comma = fragment.rfind(",")
+            if last_comma <= 0:
+                return None
+            fragment = fragment[:last_comma]
     return None
 
 
