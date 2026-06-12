@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     # Phase 2: Optional MCP transport for tools
     use_mcp_tools: bool = False
     mcp_server_url: str = "http://localhost:8000/mcp"
+
+    # Phase 3: persistent vector store (NumPy -> ChromaDB)
+    use_chroma_store: bool = False            # env: USE_CHROMA_STORE
+    chroma_persist_dir: str = "data/chroma"   # local persistent client path
+    chroma_remote_url: str = ""               # non-empty -> HttpClient (RSS escape hatch)
     
     # Voice Configuration
     whisper_model: str = "whisper-1"

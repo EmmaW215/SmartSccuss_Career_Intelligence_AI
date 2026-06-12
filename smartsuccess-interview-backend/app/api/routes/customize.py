@@ -55,18 +55,16 @@ async def upload_documents(
     files: List[UploadFile] = File(...)
 ):
     """
-    Upload documents for custom RAG building
-    Requires GPU server to be online
+    Upload documents for custom RAG building.
+
+    Phase 3 dual mode (PRD 03 §A5): GPU healthy -> existing GPU path;
+    GPU offline -> local extract/chunk/embed/store pipeline. Same response
+    shape either way; rag_id carries a gpu:/local: prefix.
     """
     gpu_client = get_gpu_client()
     status = await gpu_client.check_health()
-    
-    if not status.get("available"):
-        raise HTTPException(
-            status_code=503,
-            detail="Custom interview requires GPU server. Please ensure GPU server is running or try standard interview types."
-        )
-    
+    gpu_available = bool(status.get("available"))
+
     # Process uploaded files
     processed_files = []
     for file in files:
@@ -106,20 +104,30 @@ async def upload_documents(
                 "content_type": content_type
             })
     
-    # Build custom RAG on GPU
+    # Build custom RAG: GPU when healthy, local pipeline otherwise.
     try:
-        rag_result = await gpu_client.build_custom_rag(
-            user_id=user_id,
-            files=processed_files
-        )
-        
+        if gpu_available:
+            rag_result = await gpu_client.build_custom_rag(
+                user_id=user_id,
+                files=processed_files
+            )
+            rag_id = rag_result.get("rag_id")
+            if rag_id and not str(rag_id).startswith("gpu:"):
+                rag_id = f"gpu:{rag_id}"
+        else:
+            from app.rag.local_rag import build_local_rag
+
+            logger.info("GPU offline — building local RAG for user_id=%s", user_id)
+            rag_result = await build_local_rag(user_id=user_id, files=processed_files)
+            rag_id = rag_result.get("rag_id")
+
         return {
             "success": True,
             "user_id": user_id,
             "files_processed": len(processed_files),
             "profile": rag_result.get("profile", {}),
             "selected_questions": rag_result.get("questions", []),
-            "rag_id": rag_result.get("rag_id")
+            "rag_id": rag_id
         }
     except Exception as e:
         logger.error("Failed to build custom RAG for user_id=%s: %s", user_id, e, exc_info=True)
