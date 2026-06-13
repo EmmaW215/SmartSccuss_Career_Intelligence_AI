@@ -54,6 +54,11 @@ interface EndInterviewResult {
 
 interface UseInterviewSessionReturn {
   startInterview: (options: StartInterviewOptions) => Promise<StartInterviewResult>;
+  resumeSession: (
+    greeting: string,
+    totalQuestions: number,
+    voiceEnabled: boolean
+  ) => Promise<StartInterviewResult>;
   sendResponse: (options: SendResponseOptions) => Promise<SendResponseResult>;
   endInterview: () => Promise<EndInterviewResult>;
   isLoading: boolean;
@@ -131,6 +136,49 @@ export const useInterviewSession = (
       setIsLoading(false);
     }
   }, [sessionId, interviewType, type]);
+
+  /**
+   * Resume an EXISTING session in Voice Mode without starting a new one.
+   *
+   * The parent (InterviewPage) already created the session and has the
+   * greeting + question count. Calling startInterview() again here would issue
+   * a second /start, producing a divergent backend session record — so the
+   * interview completes on one session while the report/dashboard read the
+   * other (status "pending" → report 400). This reuses the passed sessionId and
+   * only synthesizes the greeting for playback.
+   */
+  const resumeSession = useCallback(async (
+    greeting: string,
+    totalQuestions: number,
+    voiceEnabled: boolean
+  ): Promise<StartInterviewResult> => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Reuse the existing session id — no /start call.
+      setCurrentSessionId(sessionId);
+
+      let audioUrl: string | undefined;
+      if (voiceEnabled) {
+        try {
+          const url = await synthesizeSpeech(greeting);
+          audioUrl = url || undefined;
+        } catch (ttsError) {
+          console.warn('TTS failed for greeting (resume), continuing without audio:', ttsError);
+        }
+      }
+
+      return {
+        sessionId,
+        greeting,
+        audioUrl,
+        totalQuestions,
+      };
+    } finally {
+      setIsLoading(false);
+    }
+  }, [sessionId]);
 
   /**
    * Send user response (voice or text)
@@ -215,6 +263,7 @@ export const useInterviewSession = (
 
   return {
     startInterview,
+    resumeSession,
     sendResponse,
     endInterview,
     isLoading,

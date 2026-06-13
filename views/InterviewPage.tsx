@@ -534,6 +534,19 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
     setIsInterviewComplete(true);
     setVoiceMode(false); // Switch back to text mode to show report
 
+    // Merge the Voice Mode transcript into the text-view messages so the
+    // conversation isn't lost when the panel unmounts. (Maps the panel's
+    // {role:'assistant'} shape to this view's {role:'ai'} Message.)
+    if (Array.isArray(transcript) && transcript.length > 0) {
+      const merged: Message[] = transcript.map((m, i) => ({
+        id: `voice-${Date.now()}-${i}`,
+        role: m.role === 'assistant' ? 'ai' : 'user',
+        content: m.content,
+        timestamp: m.timestamp instanceof Date ? m.timestamp : new Date(),
+      }));
+      setMessages(merged);
+    }
+
     // Fetch report
     if (sessionId) {
       getInterviewReport(sessionId)
@@ -973,6 +986,9 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
             voiceEnabled={true}
             onInterviewComplete={handleVoicePanelComplete}
             customDocuments={uploadedFiles.map(f => f.file)}
+            // Reuse the session InterviewPage already started — don't start a 2nd one.
+            initialGreeting={messages.find(m => m.id === 'greeting')?.content}
+            initialTotalQuestions={totalQuestions}
           />
         </div>
       ) : (

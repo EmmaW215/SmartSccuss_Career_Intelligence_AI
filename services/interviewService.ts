@@ -37,6 +37,36 @@ if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
   console.log('🔗 Using backend URL:', BACKEND_URL);
 }
 
+/**
+ * fetch() wrapped with an AbortController timeout.
+ *
+ * The voice loop (transcribe → message → synthesize) is a chain of awaited
+ * fetches with no native timeout. On the free Render tier a response can stall
+ * mid-flight; without a timeout the UI hangs forever on "(Transcribing...)".
+ * This aborts after `timeoutMs` and raises a clear, catchable error so callers
+ * can surface a retry instead of freezing.
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs: number = 30000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error(
+        `Request timed out after ${Math.round(timeoutMs / 1000)}s. The server may be slow — please try again.`
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // API Response Types
 export interface StartSessionRequest {
   user_id: string;
@@ -205,13 +235,13 @@ export async function sendInterviewMessage(
   }
 
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(requestBody),
-    });
+    }, 30000);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -382,16 +412,16 @@ export async function transcribeAudio(
   }
   
   const audioFile = new File([audioBlob], filename, { type: mimeType });
-  
+
   const formData = new FormData();
   formData.append('audio', audioFile);
   formData.append('language', language);
-  
+
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method: 'POST',
       body: formData,
-    });
+    }, 30000);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -619,10 +649,10 @@ export async function synthesizeSpeech(
     formData.append('text', text);
     formData.append('voice', voice);
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method: 'POST',
       body: formData,
-    });
+    }, 25000);
 
     if (!response.ok) {
       console.warn('TTS synthesis failed:', response.status);
