@@ -57,6 +57,17 @@ async def transcribe_audio(
     # Read audio data once upfront so both GPU and fallback paths can use it
     audio_data = await audio.read()
 
+    # Pre-filter empty / headers-only recordings before spending a transcription
+    # round-trip on them. A valid spoken webm/opus utterance is comfortably over
+    # 1KB; anything smaller is just container headers (the browser captured no
+    # audible audio — e.g. the "audio-capture" mic failure). Return a clean 422
+    # so the client can fall back to typing instead of seeing a misleading 500.
+    if len(audio_data) < 1024:
+        raise HTTPException(
+            status_code=422,
+            detail="No audible speech captured. Please record again or type your response.",
+        )
+
     # Phase 2: Try GPU server if enabled
     gpu_attempted = False
     if GPU_AVAILABLE and getattr(settings, 'use_gpu_voice', False):
@@ -96,8 +107,20 @@ async def transcribe_audio(
             "provider": "openai"
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # OpenAI rejects empty / undecodable audio with a 400 "Invalid file
+        # format". That is an upstream client error, not a server fault — surface
+        # it as a 422 so the client falls back cleanly instead of logging a 500.
+        msg = str(e)
+        if "Invalid file format" in msg or "invalid_request_error" in msg:
+            raise HTTPException(
+                status_code=422,
+                detail="Audio could not be transcribed (empty or unsupported). "
+                       "Please try again or type your response.",
+            )
+        raise HTTPException(status_code=500, detail=msg)
 
 
 @router.post("/synthesize")
