@@ -18,6 +18,7 @@ from app.interview.screening_interview import get_screening_interview_service
 from app.interview.behavioral_interview import get_behavioral_interview_service
 from app.interview.technical_interview import get_technical_interview_service
 from app.config import settings
+from app.utils import voice_metrics
 
 # Phase 2: Optional GPU client
 try:
@@ -55,39 +56,46 @@ async def transcribe_audio(
     """
     # Read audio data once upfront so both GPU and fallback paths can use it
     audio_data = await audio.read()
-    
+
     # Phase 2: Try GPU server if enabled
+    gpu_attempted = False
     if GPU_AVAILABLE and getattr(settings, 'use_gpu_voice', False):
+        gpu_attempted = True
         try:
             gpu_client = get_gpu_client()
             transcript, provider = await gpu_client.transcribe(audio_data, language)
+            provider_value = provider.value if provider else "gpu"
+            # Phase 4 PR 4-3: record which provider served STT.
+            voice_metrics.record_provider("stt", provider_value)
             return {
                 "text": transcript,
                 "language": language,
-                "provider": provider.value if provider else "gpu"
+                "provider": provider_value
             }
         except Exception as e:
             # Fallback to OpenAI if GPU fails
             print(f"GPU transcription failed, falling back to OpenAI: {e}")
-    
+
     # Default: Use OpenAI (existing behavior)
     voice_service = get_service()
-    
+
     if not voice_service.is_available():
         raise HTTPException(
             status_code=503,
             detail="Voice service not available (missing API key)"
         )
-    
+
     try:
         text = await voice_service.transcribe(audio_data, language)
-        
+
+        # fallback=True only when a GPU attempt preceded this OpenAI call.
+        voice_metrics.record_provider("stt", "openai", fallback=gpu_attempted)
         return {
             "text": text,
             "language": language,
             "provider": "openai"
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -111,7 +119,9 @@ async def synthesize_speech(
     Returns audio file.
     """
     # Phase 2: Try GPU server if enabled
+    gpu_attempted = False
     if GPU_AVAILABLE and getattr(settings, 'use_gpu_voice', False):
+        gpu_attempted = True
         try:
             gpu_client = get_gpu_client()
             audio_data, provider = await gpu_client.synthesize(
@@ -119,30 +129,36 @@ async def synthesize_speech(
                 voice=voice if voice in ["professional", "friendly", "calm"] else "professional"
             )
             mime_type = "audio/wav" if provider == VoiceProvider.GPU else "audio/mp3"
+            provider_value = provider.value if provider else "gpu"
+            # Phase 4 PR 4-3: record TTS provider (gpu or edge_tts fallback).
+            voice_metrics.record_provider(
+                "tts", provider_value, fallback=(provider != VoiceProvider.GPU)
+            )
             return StreamingResponse(
                 io.BytesIO(audio_data),
                 media_type=mime_type,
                 headers={
                     "Content-Disposition": "attachment; filename=response.wav",
-                    "X-Voice-Provider": provider.value
+                    "X-Voice-Provider": provider_value
                 }
             )
         except Exception as e:
             # Fallback to OpenAI if GPU fails
             print(f"GPU synthesis failed, falling back to OpenAI: {e}")
-    
+
     # Default: Use OpenAI (existing behavior)
     voice_service = get_service()
-    
+
     if not voice_service.is_available():
         raise HTTPException(
             status_code=503,
             detail="Voice service not available (missing API key)"
         )
-    
+
     try:
         audio_data = await voice_service.synthesize(text, voice, speed)
-        
+
+        voice_metrics.record_provider("tts", "openai", fallback=gpu_attempted)
         return StreamingResponse(
             io.BytesIO(audio_data),
             media_type="audio/mpeg",
@@ -151,7 +167,7 @@ async def synthesize_speech(
                 "X-Voice-Provider": "openai"
             }
         )
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -297,7 +313,9 @@ async def get_voice_service_status():
         "whisper_model": voice_service.whisper_model,
         "tts_model": voice_service.tts_model,
         "default_voice": voice_service.default_voice,
-        "provider": "openai"
+        "provider": "openai",
+        # Phase 4 PR 4-3: provider mix + $0-voice success rate
+        "provider_metrics": voice_metrics.metrics_report(),
     }
     
     # Phase 2: Add GPU status if available
