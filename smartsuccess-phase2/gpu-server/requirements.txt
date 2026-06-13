@@ -11,8 +11,9 @@ pydantic>=2.5.0
 torch>=2.1.0
 torchaudio>=2.1.0
 
-# STT - Whisper
-openai-whisper>=20231117
+# STT - faster-whisper (CTranslate2: ~4x faster, ~4x less VRAM, same large-v3 weights)
+# Phase 4 PR 4-1: replaces openai-whisper. Needs a cuDNN 8/9 wheel match on the GPU host.
+faster-whisper>=1.0.0
 
 # TTS - XTTS/Coqui
 TTS>=0.22.0

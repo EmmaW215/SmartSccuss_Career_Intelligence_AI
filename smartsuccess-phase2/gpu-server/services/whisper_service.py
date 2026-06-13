@@ -1,10 +1,15 @@
 """
 GPU Whisper Service
-High-accuracy STT using Whisper Large-v3
+High-accuracy STT using faster-whisper (CTranslate2) Large-v3
 
 Cost: $0 (self-hosted)
-Quality: Best available
+Quality: same large-v3 weights as openai-whisper, ~4x faster / ~4x less VRAM
 Languages: 99+ languages supported
+
+Phase 4 PR 4-1: swapped openai-whisper -> faster-whisper. The transcribe()
+return shape ({text, language, segments, confidence}) is unchanged, so
+main.py's /api/stt/transcribe response and the Render-side gpu_client.py
+need zero changes.
 """
 
 import os
@@ -14,43 +19,68 @@ import time
 import asyncio
 from typing import Optional, Dict, Any
 
-import torch
-
 logger = logging.getLogger("gpu.stt.whisper")
+
+
+def _detect_device() -> str:
+    """Prefer CUDA when available; torch is imported lazily so this module
+    can be imported (for contract tests) without torch installed."""
+    try:
+        import torch
+
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        return "cpu"
 
 
 class WhisperService:
     """
-    GPU-accelerated Whisper for high-accuracy transcription
-    
-    Model: whisper-large-v3
-    - Best accuracy available
-    - Multi-language support
-    - Word-level timestamps
+    GPU-accelerated faster-whisper for high-accuracy transcription
+
+    Model: whisper-large-v3 (CTranslate2)
+    - int8_float16 on CUDA (~3.5 GB VRAM) / int8 on CPU
+    - Multi-language support, VAD filtering
     """
-    
+
     def __init__(self, model_size: str = "large-v3"):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = _detect_device()
         self.model_size = model_size
+        # compute_type: GPU default int8_float16; CPU needs int8.
+        # Override via WHISPER_COMPUTE (PRD: CPU-offload-friendly fallback).
+        self.compute_type = os.getenv("WHISPER_COMPUTE") or (
+            "int8_float16" if self.device == "cuda" else "int8"
+        )
         self.model = None
-        
+
         self._load_model()
-    
+
     def _load_model(self):
-        """Load Whisper model"""
+        """Load the faster-whisper model"""
         try:
-            import whisper
-            
-            logger.info("Loading Whisper %s on %s...", self.model_size, self.device)
+            from faster_whisper import WhisperModel
+
+            logger.info(
+                "Loading faster-whisper %s on %s (compute=%s)...",
+                self.model_size, self.device, self.compute_type,
+            )
             t0 = time.perf_counter()
-            self.model = whisper.load_model(self.model_size, device=self.device)
-            logger.info("Whisper loaded successfully in %.1fs", time.perf_counter() - t0)
-            
+            self.model = WhisperModel(
+                self.model_size,
+                device=self.device,
+                compute_type=self.compute_type,
+            )
+            logger.info(
+                "faster-whisper loaded successfully in %.1fs",
+                time.perf_counter() - t0,
+            )
+
         except ImportError:
-            logger.error("whisper package not installed — STT will be unavailable")
+            logger.error(
+                "faster-whisper package not installed — STT will be unavailable"
+            )
             self.model = None
         except Exception as e:
-            logger.error("Failed to load Whisper model: %s", e)
+            logger.error("Failed to load faster-whisper model: %s", e)
             self.model = None
     
     async def transcribe(
@@ -109,23 +139,40 @@ class WhisperService:
         audio_path: str,
         language: Optional[str]
     ) -> Dict[str, Any]:
-        """Synchronous transcription"""
-        options = {
-            "task": "transcribe",
-            "word_timestamps": True,
-            "fp16": self.device == "cuda"
-        }
-        
-        if language:
-            options["language"] = language
-        
-        result = self.model.transcribe(audio_path, **options)
-        
+        """Synchronous transcription via faster-whisper.
+
+        faster-whisper returns (segments_generator, info); the generator is
+        lazy, so iterating it is what actually runs inference. We normalize the
+        segments back into the same dict shape the openai-whisper path emitted
+        ({start, end, text, avg_logprob}) so downstream consumers and the
+        confidence calc are unchanged.
+        """
+        segments_iter, info = self.model.transcribe(
+            audio_path,
+            task="transcribe",
+            language=language,        # None -> auto-detect
+            vad_filter=True,          # PRD: drop non-speech, improves accuracy
+            word_timestamps=True,
+        )
+
+        segments = []
+        text_parts = []
+        for seg in segments_iter:
+            text_parts.append(seg.text)
+            segments.append({
+                "start": getattr(seg, "start", 0.0),
+                "end": getattr(seg, "end", 0.0),
+                "text": seg.text,
+                "avg_logprob": getattr(seg, "avg_logprob", 0.0),
+            })
+
+        detected_language = getattr(info, "language", None) or language or "en"
+
         return {
-            "text": result["text"].strip(),
-            "language": result.get("language", "en"),
-            "segments": result.get("segments", []),
-            "confidence": self._calculate_confidence(result)
+            "text": "".join(text_parts).strip(),
+            "language": detected_language,
+            "segments": segments,
+            "confidence": self._calculate_confidence({"segments": segments}),
         }
     
     def _calculate_confidence(self, result: Dict) -> float:
