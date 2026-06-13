@@ -216,13 +216,26 @@ def safe_parse_evaluation(
         Parsed evaluation dict or default_evaluation
     """
     result = extract_json_from_llm(response_text)
-    
+
     if result is None:
         logger.warning(
             f"Using fallback evaluation for session {session_id}. "
             f"LLM response could not be parsed."
         )
-        return {**default_evaluation, "_evaluation_status": "fallback", 
+        return {**default_evaluation, "_evaluation_status": "fallback",
                 "_fallback_reason": "json_parse_failure"}
-    
+
+    # Guard the documented "guaranteed dict" contract: an evaluator LLM can
+    # emit a top-level JSON array (or scalar) instead of an object. Callers
+    # (_check_follow_up etc.) immediately do result.get(...), so a non-dict
+    # would raise "'list' object has no attribute 'get'" -> HTTP 500.
+    # Treat it exactly like an unparseable response: fall back to the default.
+    if not isinstance(result, dict):
+        logger.warning(
+            f"Using fallback evaluation for session {session_id}. "
+            f"LLM returned non-dict JSON ({type(result).__name__})."
+        )
+        return {**default_evaluation, "_evaluation_status": "fallback",
+                "_fallback_reason": "non_dict_json"}
+
     return result
