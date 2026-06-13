@@ -11,6 +11,7 @@ Cost: $0 (self-hosted, only electricity)
 """
 
 import os
+import asyncio
 import logging
 import time
 import torch
@@ -18,7 +19,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List
 import io
@@ -28,6 +29,16 @@ from services.whisper_service import WhisperService
 from services.tts_service import TTSService
 from services.rag_service import RAGService
 from services.metrics import metrics
+from services.auth import INTERNAL_TOKEN_HEADER, is_authorized
+
+# ── Phase 4 PR 4-2: production hardening ──────────────────────────────
+# Shared-secret auth: when set, /api/* and /metrics require X-Internal-Token.
+# Unset -> auth disabled (legacy behavior preserved).
+INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "").strip()
+
+# Cap concurrent GPU inference to avoid VRAM OOM (Whisper + XTTS share the card).
+GPU_CONCURRENCY = int(os.getenv("GPU_CONCURRENCY", "2"))
+_gpu_semaphore = asyncio.Semaphore(GPU_CONCURRENCY)
 
 # Initialize logging BEFORE anything else
 setup_logging()
@@ -46,6 +57,11 @@ async def lifespan(app: FastAPI):
     global whisper_service, tts_service, rag_service
     
     logger.info("Starting SmartSuccess GPU Server v1.1.0")
+    logger.info(
+        "Internal auth: %s | GPU concurrency limit: %d",
+        "ENABLED" if INTERNAL_API_TOKEN else "DISABLED (INTERNAL_API_TOKEN unset)",
+        GPU_CONCURRENCY,
+    )
     logger.info("CUDA available: %s", torch.cuda.is_available())
     
     if torch.cuda.is_available():
@@ -96,6 +112,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ==================== Auth Middleware ====================
+
+_auth_logger = logging.getLogger("gpu.auth")
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Gate /api/* and /metrics behind X-Internal-Token when configured.
+
+    Unauthorized requests get a 401 here and never reach the route handler, so
+    no inference work runs for them (the 401 is still counted by the metrics
+    middleware, which is fine).
+    """
+    if not is_authorized(
+        request.url.path,
+        request.headers.get(INTERNAL_TOKEN_HEADER, ""),
+        INTERNAL_API_TOKEN,
+    ):
+        _auth_logger.warning(
+            "401 unauthorized — %s %s (missing/invalid %s)",
+            request.method, request.url.path, INTERNAL_TOKEN_HEADER,
+        )
+        return JSONResponse(
+            status_code=401,
+            content={"detail": f"Missing or invalid {INTERNAL_TOKEN_HEADER}"},
+        )
+    return await call_next(request)
 
 
 # ==================== Metrics Middleware ====================
@@ -321,13 +366,14 @@ async def transcribe_audio(
         language, audio_size_kb, audio.filename,
     )
     
-    # Transcribe
+    # Transcribe (semaphore caps concurrent GPU inference -> no VRAM OOM)
     t0 = time.perf_counter()
     try:
-        result = await whisper_service.transcribe(
-            audio_data=audio_data,
-            language=language if language != "auto" else None
-        )
+        async with _gpu_semaphore:
+            result = await whisper_service.transcribe(
+                audio_data=audio_data,
+                language=language if language != "auto" else None
+            )
         elapsed_ms = (time.perf_counter() - t0) * 1000
         
         text_preview = result["text"][:80].replace("\n", " ")
@@ -390,12 +436,13 @@ async def synthesize_speech(body: TTSRequest):
     
     t0 = time.perf_counter()
     try:
-        audio_data = await tts_service.synthesize(
-            text=body.text,
-            voice=body.voice,
-            emotion=body.emotion,
-            language=body.language
-        )
+        async with _gpu_semaphore:
+            audio_data = await tts_service.synthesize(
+                text=body.text,
+                voice=body.voice,
+                emotion=body.emotion,
+                language=body.language
+            )
         elapsed_ms = (time.perf_counter() - t0) * 1000
         audio_size_kb = len(audio_data) / 1024
         
@@ -482,10 +529,11 @@ async def build_custom_rag(
     
     t0 = time.perf_counter()
     try:
-        result = await rag_service.build(
-            user_id=user_id,
-            files=processed_files
-        )
+        async with _gpu_semaphore:
+            result = await rag_service.build(
+                user_id=user_id,
+                files=processed_files
+            )
         elapsed_ms = (time.perf_counter() - t0) * 1000
         
         _rag_logger.info(
@@ -534,7 +582,8 @@ async def query_documents(
         raise HTTPException(status_code=503, detail="RAG service not available")
     
     t0 = time.perf_counter()
-    results = await rag_service.query_documents(user_id, query, n_results)
+    async with _gpu_semaphore:
+        results = await rag_service.query_documents(user_id, query, n_results)
     elapsed_ms = (time.perf_counter() - t0) * 1000
     
     _rag_logger.info(

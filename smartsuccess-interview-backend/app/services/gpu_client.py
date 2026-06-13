@@ -60,9 +60,18 @@ class GPUClient:
         self._http_client: Optional[httpx.AsyncClient] = None
 
     async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create HTTP client"""
+        """Get or create HTTP client.
+
+        Phase 4 PR 4-2: attach the X-Internal-Token header on every GPU request
+        when configured, so the hardened GPU server accepts us. Unset -> no
+        header (and the GPU server then skips auth too) — legacy behavior.
+        """
         if self._http_client is None or self._http_client.is_closed:
-            self._http_client = httpx.AsyncClient(timeout=self.timeout)
+            headers = {}
+            token = getattr(settings, "internal_api_token", "") or ""
+            if token:
+                headers["X-Internal-Token"] = token
+            self._http_client = httpx.AsyncClient(timeout=self.timeout, headers=headers)
         return self._http_client
 
     async def check_health(self, force: bool = False) -> Dict[str, Any]:

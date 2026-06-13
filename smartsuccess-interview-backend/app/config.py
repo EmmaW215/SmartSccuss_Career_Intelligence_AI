@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     gpu_server_timeout: int = 30
     gpu_health_check_interval: int = 60  # Health check cache TTL in seconds
     use_gpu_voice: bool = False  # True = GPU STT/TTS, False = OpenAI (default)
+    # Phase 4 PR 4-2: shared secret sent as X-Internal-Token to the GPU server.
+    # Empty -> no header (GPU server then also skips auth) = legacy behavior.
+    internal_api_token: str = ""  # env: INTERNAL_API_TOKEN
     
     # Phase 2: Conversation Engine (natural conversation mode)
     use_conversation_engine: bool = True  # Enable natural conversation style
