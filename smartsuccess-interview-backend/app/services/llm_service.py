@@ -13,6 +13,7 @@ FIXES APPLIED:
 """
 
 import os
+import time
 import logging
 from typing import Optional, Dict, Any, List
 from datetime import date
@@ -41,6 +42,14 @@ class LLMService:
         self._daily_requests = 0
         self._last_reset_date: Optional[date] = None
         self._free_tier_limit = 1500
+
+        # Gemini 429 circuit breaker: the per-process daily counter can't see
+        # account-level quota exhaustion (shared across restarts/deploys), so a
+        # blown quota otherwise costs every call two wasted Gemini round-trips
+        # before reaching Groq. When Gemini 429s, skip it for a cooldown window;
+        # it is retried automatically afterwards (and quota resets at midnight).
+        self._gemini_cooldown_until: float = 0.0
+        self._gemini_cooldown_seconds = 900  # 15 minutes
 
         # FIX: F-A3 (Sprint 5) — Track per-provider usage for cost reporting
         self._provider_usage: Dict[str, int] = {
@@ -196,6 +205,16 @@ class LLMService:
             )
 
             if response.status_code != 200:
+                # 429 = quota/rate limit exhausted: open the circuit breaker so
+                # subsequent calls skip Gemini until the cooldown expires.
+                if response.status_code == 429:
+                    self._gemini_cooldown_until = (
+                        time.monotonic() + self._gemini_cooldown_seconds
+                    )
+                    logger.warning(
+                        "Gemini rate-limited (429); skipping Gemini for %ds",
+                        self._gemini_cooldown_seconds,
+                    )
                 raise Exception(
                     f"Gemini API error {response.status_code}: "
                     f"{response.text[:200]}"
@@ -333,13 +352,16 @@ class LLMService:
         # Cost-optimized order: Gemini → Groq → OpenAI
         providers = []
 
+        # Gemini levels are skipped entirely while the 429 circuit breaker is
+        # open (preference order is otherwise unchanged when Gemini is healthy).
+        gemini_available = self.gemini_api_key and not self._gemini_in_cooldown()
+
         # Level 1: Gemini free tier
-        if (self.gemini_api_key
-                and self._daily_requests < self._free_tier_limit):
+        if gemini_available and self._daily_requests < self._free_tier_limit:
             providers.append(config["primary"])
 
         # Level 2: Gemini fallback model
-        if self.gemini_api_key:
+        if gemini_available:
             providers.append(config["fallback"])
 
         # Level 3: Groq / Llama (free)
@@ -350,7 +372,16 @@ class LLMService:
         if self.openai_api_key:
             providers.append(config["emergency"])
 
+        # Safety net: never return an empty chain just because Gemini is in
+        # cooldown — if it is the only configured provider, still try it.
+        if not providers and self.gemini_api_key:
+            providers.append(config["fallback"])
+
         return providers
+
+    def _gemini_in_cooldown(self) -> bool:
+        """True while the Gemini 429 circuit breaker is open."""
+        return time.monotonic() < self._gemini_cooldown_until
 
     def _check_daily_reset(self):
         """Reset daily counter at midnight"""
