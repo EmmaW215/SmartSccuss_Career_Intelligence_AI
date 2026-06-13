@@ -80,7 +80,7 @@ class TestTranscribeEndpointRecordsProvider:
 
         resp = client.post(
             "/api/voice/transcribe",
-            files={"audio": ("a.webm", b"audio-bytes", "audio/webm")},
+            files={"audio": ("a.webm", b"x" * 2048, "audio/webm")},  # >1KB: passes the empty-audio guard
             data={"language": "en"},
         )
         assert resp.status_code == 200
@@ -102,7 +102,7 @@ class TestTranscribeEndpointRecordsProvider:
 
         resp = client.post(
             "/api/voice/transcribe",
-            files={"audio": ("a.webm", b"audio-bytes", "audio/webm")},
+            files={"audio": ("a.webm", b"x" * 2048, "audio/webm")},  # >1KB: passes the empty-audio guard
             data={"language": "en"},
         )
         assert resp.status_code == 200
