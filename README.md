@@ -1200,5 +1200,9 @@ For issues, questions, or contributions:
 
 <img width="2242" height="1190" alt="image" src="https://github.com/user-attachments/assets/76687d06-9264-4f91-a9fa-31092c8af169" />
 
+<img width="2336" height="1181" alt="image" src="https://github.com/user-attachments/assets/85257d9d-4f86-4ee0-8d08-96c054863b78" />
+
+<img width="2336" height="1181" alt="image" src="https://github.com/user-attachments/assets/bd10ad04-a42c-4d2c-b866-ae447d6ee395" />
+
 https://smart-sccuss-career-intelligence-ai.vercel.app/
 
