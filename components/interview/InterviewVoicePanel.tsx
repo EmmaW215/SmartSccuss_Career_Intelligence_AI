@@ -8,7 +8,7 @@
  * - Voice/text mode toggle
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useMicrophone } from '../../hooks/useMicrophone';
 import { useAudioPlayer } from '../../hooks/useAudioPlayer';
 import { useInterviewSession } from '../../hooks/useInterviewSession';
@@ -32,6 +32,10 @@ interface InterviewVoicePanelProps {
   voiceEnabled?: boolean;
   onInterviewComplete: (transcript: Message[]) => void;
   customDocuments?: File[];
+  // When provided, the parent already started this session — reuse it instead
+  // of issuing a second /start (which would create a divergent backend record).
+  initialGreeting?: string;
+  initialTotalQuestions?: number;
 }
 
 export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
@@ -40,7 +44,9 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
   userName,
   voiceEnabled = true,
   onInterviewComplete,
-  customDocuments
+  customDocuments,
+  initialGreeting,
+  initialTotalQuestions
 }) => {
   // State
   const [conversation, setConversation] = useState<Message[]>([]);
@@ -53,6 +59,12 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
   const [useTextMode, setUseTextMode] = useState(!voiceEnabled);
   // Greeting that couldn't auto-play (browser autoplay block) — offer a tap-to-play button.
   const [pendingGreetingAudio, setPendingGreetingAudio] = useState<string | null>(null);
+  // Always-current mirror of `conversation` so completion callbacks pass the full
+  // transcript (a closure over `conversation` would be stale).
+  const conversationRef = useRef<Message[]>([]);
+  useEffect(() => {
+    conversationRef.current = conversation;
+  }, [conversation]);
 
   // Hooks
   const {
@@ -72,6 +84,7 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
 
   const {
     startInterview,
+    resumeSession,
     sendResponse,
     endInterview,
     isLoading
@@ -94,18 +107,27 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
         }
       }
 
-      // Start interview.
+      // Start (or resume) the interview.
       // NOTE: TTS playback is an OUTPUT and must not be gated on the microphone.
       // The mic only governs whether we can record the user (input). Passing
       // `voiceEnabled` straight through ensures the opening greeting is
-      // synthesized + spoken even before/without a working mic. (Previously this
-      // was `voiceEnabled && isMicAvailable`, where isMicAvailable was a stale
-      // `false` on first mount, so the greeting was always silent.)
-      const result = await startInterview({
-        userName,
-        voiceEnabled,
-        customDocuments
-      });
+      // synthesized + spoken even before/without a working mic.
+      //
+      // If the parent (InterviewPage) already started this session and handed us
+      // its greeting, RESUME it — issuing a second /start here would create a
+      // divergent backend session, so the interview would complete on one record
+      // while the report/dashboard read another (status "pending" → report 400).
+      const result = (initialGreeting && sessionId)
+        ? await resumeSession(
+            initialGreeting,
+            initialTotalQuestions ?? 0,
+            voiceEnabled
+          )
+        : await startInterview({
+            userName,
+            voiceEnabled,
+            customDocuments
+          });
 
       setTotalQuestions(result.totalQuestions);
 
@@ -185,12 +207,26 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
           setIsAISpeaking(false);
         }
 
-        // Check completion
+        // Check completion — pass the live transcript (ref), not a stale closure.
         if (result.isComplete) {
-          onInterviewComplete(conversation);
+          onInterviewComplete(conversationRef.current);
         }
 
       } catch (err) {
+        // Clear the "(Transcribing...)" placeholder so the turn doesn't freeze;
+        // replace it with a recoverable note (e.g. on a request timeout).
+        setConversation(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === 'user' && last.content === '(Transcribing...)') {
+            updated[updated.length - 1] = {
+              role: 'user',
+              content: '(Could not process that — please try again)',
+              timestamp: new Date()
+            };
+          }
+          return updated;
+        });
         setError(err instanceof Error ? err.message : 'Failed to process response');
       } finally {
         setIsProcessing(false);
@@ -245,7 +281,7 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
       }
 
       if (result.isComplete) {
-        onInterviewComplete(conversation);
+        onInterviewComplete(conversationRef.current);
       }
 
     } catch (err) {
@@ -273,7 +309,7 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
   const handleEndInterview = async () => {
     try {
       await endInterview();
-      onInterviewComplete(conversation);
+      onInterviewComplete(conversationRef.current);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to end interview');
     }
