@@ -310,8 +310,11 @@ export const InterviewPage: React.FC<InterviewPageProps> = ({ interviewType, onN
           // Stop microphone recording and get audio blob
           const audioBlob = await stopMicRecording();
           
-          // Check if audio blob is valid
-          if (!audioBlob || audioBlob.size === 0) {
+          // Check if audio blob is valid. A blob under ~1KB is just container
+          // headers with no audible audio (e.g. the mic "audio-capture" failure),
+          // which OpenAI rejects — short-circuit to the type/Web-Speech fallback
+          // instead of uploading un-transcribable bytes.
+          if (!audioBlob || audioBlob.size < 1024) {
             throw new Error('No audio recorded. Please try again.');
           }
           
