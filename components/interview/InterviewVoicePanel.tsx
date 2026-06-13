@@ -51,6 +51,8 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
   const [useTextMode, setUseTextMode] = useState(!voiceEnabled);
+  // Greeting that couldn't auto-play (browser autoplay block) — offer a tap-to-play button.
+  const [pendingGreetingAudio, setPendingGreetingAudio] = useState<string | null>(null);
 
   // Hooks
   const {
@@ -92,10 +94,16 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
         }
       }
 
-      // Start interview
+      // Start interview.
+      // NOTE: TTS playback is an OUTPUT and must not be gated on the microphone.
+      // The mic only governs whether we can record the user (input). Passing
+      // `voiceEnabled` straight through ensures the opening greeting is
+      // synthesized + spoken even before/without a working mic. (Previously this
+      // was `voiceEnabled && isMicAvailable`, where isMicAvailable was a stale
+      // `false` on first mount, so the greeting was always silent.)
       const result = await startInterview({
         userName,
-        voiceEnabled: voiceEnabled && isMicAvailable,
+        voiceEnabled,
         customDocuments
       });
 
@@ -110,11 +118,17 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
       };
       setConversation([greetingMessage]);
 
-      // Auto-play greeting if voice enabled
+      // Auto-play greeting if voice enabled. If the browser blocks autoplay,
+      // surface a tap-to-play button instead of failing silently.
       if (voiceEnabled && result.audioUrl) {
-        setIsAISpeaking(true);
-        await playAudio(result.audioUrl);
-        setIsAISpeaking(false);
+        try {
+          setIsAISpeaking(true);
+          await playAudio(result.audioUrl);
+        } catch (playErr) {
+          setPendingGreetingAudio(result.audioUrl);
+        } finally {
+          setIsAISpeaking(false);
+        }
       }
 
     } catch (err) {
@@ -241,6 +255,20 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
     }
   };
 
+  // Play a greeting whose autoplay was blocked (invoked from a user tap).
+  const handlePlayGreeting = useCallback(async () => {
+    if (!pendingGreetingAudio) return;
+    try {
+      setIsAISpeaking(true);
+      await playAudio(pendingGreetingAudio);
+      setPendingGreetingAudio(null);
+    } catch {
+      // Leave the button up so the user can retry.
+    } finally {
+      setIsAISpeaking(false);
+    }
+  }, [pendingGreetingAudio, playAudio]);
+
   // Handle end interview
   const handleEndInterview = async () => {
     try {
@@ -321,6 +349,18 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
           </div>
         )}
       </div>
+
+      {/* Tap-to-play greeting (shown only if autoplay was blocked) */}
+      {pendingGreetingAudio && !isAISpeaking && (
+        <div className="px-4">
+          <button
+            onClick={handlePlayGreeting}
+            className="w-full py-2 text-sm rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50"
+          >
+            🔊 Play greeting
+          </button>
+        </div>
+      )}
 
       {/* Progress Bar */}
       <div className="px-4 py-2">
