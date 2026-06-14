@@ -10,6 +10,17 @@ from datetime import datetime
 from app.models import InterviewSession as BaseInterviewSession, InterviewPhase
 from app.services.session_store import InterviewSession as StoreSession, InterviewStatus, SessionStore
 
+# Canonical (lowercase) interview types stored on the dashboard.
+_KNOWN_INTERVIEW_TYPES = {"screening", "behavioral", "technical", "customize"}
+
+# Shown for a response whose evaluation produced no feedback text (e.g. the LLM
+# evaluator was rate-limited and fell back). Beats an empty string, which the
+# dashboard renders as the bare "No detailed feedback available." placeholder.
+_EMPTY_FEEDBACK_NOTE = (
+    "Detailed AI feedback wasn't available for this answer "
+    "(the evaluation service was temporarily busy)."
+)
+
 
 def convert_base_session_to_store(
     base_session: BaseInterviewSession,
@@ -25,17 +36,20 @@ def convert_base_session_to_store(
     Returns:
         StoreSession compatible with SessionStore
     """
-    # Map interview type
-    interview_type_map = {
-        "Screening Interview": "screening",
-        "Behavioral Interview": "behavioral",
-        "Technical Interview": "technical",
-        "Customize Interview": "customize"
-    }
-    
-    interview_type = interview_type_map.get(
-        base_session.interview_type.value if hasattr(base_session.interview_type, 'value') else str(base_session.interview_type),
-        "screening"
+    # Map interview type.
+    # The InterviewType enum values are lowercase ("technical"), and with
+    # use_enum_values=True the field is already that string. A previous title-case
+    # lookup table ("Technical Interview") never matched and fell back to
+    # "screening" on every miss — so EVERY non-screening session was mislabeled as
+    # "screening" on the dashboard. Normalize the raw value directly instead.
+    _raw_type = (
+        base_session.interview_type.value
+        if hasattr(base_session.interview_type, "value")
+        else str(base_session.interview_type)
+    )
+    _normalized_type = _raw_type.strip().lower().replace(" interview", "").strip()
+    interview_type = (
+        _normalized_type if _normalized_type in _KNOWN_INTERVIEW_TYPES else "screening"
     )
     
     # Map phase to status.
@@ -93,6 +107,7 @@ def convert_base_session_to_store(
     
     # Extract feedback hints from evaluations
     feedback_hints = []
+    _empty_note_added = False  # add the "feedback unavailable" note at most once
     for response in base_session.responses:
         evaluation = response.get("evaluation", {})
         if evaluation:
@@ -104,9 +119,18 @@ def convert_base_session_to_store(
                 quality = "fair"
             else:
                 quality = "needs_improvement"
-            
+
+            # Degrade empty feedback to a meaningful note (only the first time,
+            # so the dashboard summary reads it once rather than repeating it).
+            # The quality tag is still kept for every response so score counts
+            # stay accurate.
+            hint_text = (evaluation.get("feedback") or "").strip()
+            if not hint_text and not _empty_note_added:
+                hint_text = _EMPTY_FEEDBACK_NOTE
+                _empty_note_added = True
+
             feedback_hints.append({
-                "hint": evaluation.get("feedback", ""),
+                "hint": hint_text,
                 "quality": quality
             })
     
