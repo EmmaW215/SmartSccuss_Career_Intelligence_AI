@@ -6,7 +6,7 @@
  * source in case GPU Whisper and OpenAI Whisper are both unavailable.
  */
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 
 interface MicrophoneStatus {
   available: boolean;
@@ -28,6 +28,7 @@ interface UseMicrophoneReturn {
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<Blob>;
   cancelRecording: () => void;
+  resetMic: () => void;
 }
 
 // Check if Web Speech API is available
@@ -51,7 +52,13 @@ export const useMicrophone = (
   // stream (header-only blobs / "audio-capture" errors). Callers that don't use
   // the Web Speech transcript (e.g. InterviewVoicePanel) should pass `false` to
   // keep MediaRecorder the sole mic consumer.
-  enableWebSpeechFallback: boolean = true
+  enableWebSpeechFallback: boolean = true,
+  // Reuse ONE getUserMedia stream across turns instead of re-acquiring every
+  // time. Re-acquiring per turn (the default) can, after ~8 cycles, leave Chrome
+  // returning a silent/garbage stream → undecodable recordings. Opt-in so the
+  // default behavior (InterviewPage) is byte-for-byte unchanged; the stream is
+  // health-checked before reuse and can be force-refreshed via resetMic().
+  persistentMicStream: boolean = false
 ): UseMicrophoneReturn => {
   const [status, setStatus] = useState<MicrophoneStatus>({
     available: false,
@@ -216,6 +223,34 @@ export const useMicrophone = (
     return transcript;
   }, []);
 
+  // Audio constraints used for every capture.
+  const AUDIO_CONSTRAINTS: MediaStreamConstraints = {
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      sampleRate: 16000
+    }
+  };
+
+  /**
+   * Acquire a mic stream, reusing a healthy persistent one when enabled.
+   * A track is "healthy" only if it is live, enabled and not muted; otherwise
+   * we drop it and acquire a fresh one (self-heals a stream gone bad mid-session).
+   */
+  const getStream = useCallback(async (): Promise<MediaStream> => {
+    if (persistentMicStream && streamRef.current) {
+      const track = streamRef.current.getAudioTracks()[0];
+      if (track && track.readyState === 'live' && track.enabled && !track.muted) {
+        return streamRef.current; // reuse
+      }
+      // Stale/dead stream — release and re-acquire below.
+      try { streamRef.current.getTracks().forEach(t => t.stop()); } catch { /* noop */ }
+      streamRef.current = null;
+    }
+    return navigator.mediaDevices.getUserMedia(AUDIO_CONSTRAINTS);
+  }, [persistentMicStream]);
+
   /**
    * Start recording audio (with parallel Web Speech API fallback)
    */
@@ -232,14 +267,8 @@ export const useMicrophone = (
     webSpeechTextRef.current = '';
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: 16000
-        }
-      });
+      // Acquire (or, when persistent, reuse a healthy) mic stream.
+      const stream = await getStream();
 
       streamRef.current = stream;
       chunksRef.current = [];
@@ -280,7 +309,7 @@ export const useMicrophone = (
     } catch (error) {
       throw new Error('Failed to start recording');
     }
-  }, [status.available, checkMicrophone, startWebSpeechRecognition, enableWebSpeechFallback]);
+  }, [status.available, checkMicrophone, startWebSpeechRecognition, enableWebSpeechFallback, getStream]);
 
   /**
    * Stop recording and return audio blob
@@ -301,17 +330,19 @@ export const useMicrophone = (
         // Create blob from chunks
         const mimeType = mediaRecorder.mimeType || 'audio/webm';
         const blob = new Blob(chunksRef.current, { type: mimeType });
-        
+
         setAudioBlob(blob);
         setIsRecording(false);
 
-        // Stop all tracks
-        if (streamRef.current) {
+        // Release the stream after each turn ONLY in the default (per-turn) mode.
+        // When persistent, keep the healthy stream alive for reuse — resetMic()
+        // / unmount cleanup release it instead.
+        if (!persistentMicStream && streamRef.current) {
           streamRef.current.getTracks().forEach(track => track.stop());
           streamRef.current = null;
         }
 
-        // Cleanup
+        // Cleanup (recorder + chunks are per-recording regardless of mode)
         mediaRecorderRef.current = null;
         chunksRef.current = [];
 
@@ -320,7 +351,7 @@ export const useMicrophone = (
 
       mediaRecorder.stop();
     });
-  }, [isRecording, stopWebSpeechRecognition]);
+  }, [isRecording, stopWebSpeechRecognition, persistentMicStream]);
 
   /**
    * Cancel recording without returning data
@@ -344,6 +375,30 @@ export const useMicrophone = (
     setWebSpeechTranscript(null);
   }, [isRecording, stopWebSpeechRecognition]);
 
+  /**
+   * Drop any held mic stream so the NEXT recording acquires a fresh one.
+   * Callers invoke this after a failed transcription to self-heal a persistent
+   * stream that has gone bad. Safe in non-persistent mode (stream is already
+   * released between turns, so this is a no-op there).
+   */
+  const resetMic = useCallback(() => {
+    if (streamRef.current) {
+      try { streamRef.current.getTracks().forEach(t => t.stop()); } catch { /* noop */ }
+      streamRef.current = null;
+    }
+  }, []);
+
+  // Release a persistent stream when the consumer unmounts (e.g. leaving Voice
+  // Mode), so the mic indicator turns off. No-op in per-turn mode.
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        try { streamRef.current.getTracks().forEach(t => t.stop()); } catch { /* noop */ }
+        streamRef.current = null;
+      }
+    };
+  }, []);
+
   return {
     isMicAvailable: status.available,
     permissionGranted: status.permissionGranted,
@@ -356,7 +411,8 @@ export const useMicrophone = (
     checkMicrophone,
     startRecording,
     stopRecording,
-    cancelRecording
+    cancelRecording,
+    resetMic
   };
 };
 
