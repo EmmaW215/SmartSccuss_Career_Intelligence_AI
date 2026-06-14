@@ -66,7 +66,19 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
     conversationRef.current = conversation;
   }, [conversation]);
 
+  // Tracks mount state so background TTS doesn't setState after unmount
+  // (the panel unmounts on completion while a synth/play may still be running).
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
   // Hooks
+  // Pass `false`: this panel never uses the Web Speech transcript, so running it
+  // in parallel only contends with MediaRecorder for the mic (the cause of
+  // empty/undecodable recordings late in a session). MediaRecorder stays the
+  // sole mic consumer.
   const {
     isMicAvailable,
     isRecording,
@@ -74,7 +86,7 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
     stopRecording,
     checkMicrophone,
     error: micError
-  } = useMicrophone();
+  } = useMicrophone(false);
 
   const {
     playAudio,
@@ -85,10 +97,30 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
   const {
     startInterview,
     resumeSession,
+    synthesizeForPlayback,
     sendResponse,
     endInterview,
     isLoading
   } = useInterviewSession(sessionId, interviewType);
+
+  // Synthesize + play speech in the BACKGROUND so a slow/failed TTS never blocks
+  // or delays a conversation turn. `isGreeting` routes an autoplay-blocked clip
+  // to the tap-to-play button.
+  const speak = useCallback(async (text: string, isGreeting = false) => {
+    if (!text) return;
+    const url = await synthesizeForPlayback(text);
+    if (!url || !isMountedRef.current) return;
+    try {
+      stopAudio(); // avoid overlapping clips if the user moved on quickly
+      if (isMountedRef.current) setIsAISpeaking(true);
+      await playAudio(url);
+    } catch (playErr) {
+      // Autoplay blocked (mostly only the on-mount greeting) — offer a button.
+      if (isGreeting && isMountedRef.current) setPendingGreetingAudio(url);
+    } finally {
+      if (isMountedRef.current) setIsAISpeaking(false);
+    }
+  }, [synthesizeForPlayback, playAudio, stopAudio]);
 
   // Initialize interview on mount
   useEffect(() => {
@@ -135,22 +167,14 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
       const greetingMessage: Message = {
         role: 'assistant',
         content: result.greeting,
-        audioUrl: result.audioUrl,
         timestamp: new Date()
       };
       setConversation([greetingMessage]);
 
-      // Auto-play greeting if voice enabled. If the browser blocks autoplay,
-      // surface a tap-to-play button instead of failing silently.
-      if (voiceEnabled && result.audioUrl) {
-        try {
-          setIsAISpeaking(true);
-          await playAudio(result.audioUrl);
-        } catch (playErr) {
-          setPendingGreetingAudio(result.audioUrl);
-        } finally {
-          setIsAISpeaking(false);
-        }
+      // Speak the greeting in the background (non-blocking) so startup isn't
+      // held up by a slow synthesize. Autoplay-blocked → tap-to-play button.
+      if (voiceEnabled) {
+        void speak(result.greeting, true);
       }
 
     } catch (err) {
@@ -167,7 +191,15 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
       try {
         setIsProcessing(true);
         const audioBlob = await stopRecording();
-        
+
+        // Guard empty / headers-only recordings (under ~1KB = no audible audio)
+        // before a network round-trip — these otherwise come back 422. Tell the
+        // user to retry instead of posting un-transcribable bytes.
+        if (!audioBlob || audioBlob.size < 1024) {
+          setError("I didn't catch that — please try again.");
+          return;
+        }
+
         // Add placeholder message
         setConversation(prev => [...prev, {
           role: 'user',
@@ -193,19 +225,14 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
         const aiMessage: Message = {
           role: 'assistant',
           content: result.aiResponse,
-          audioUrl: result.audioUrl,
           feedbackHint: result.feedbackHint,
           timestamp: new Date()
         };
         setConversation(prev => [...prev, aiMessage]);
         setCurrentQuestion(result.currentQuestion);
 
-        // Play AI response
-        if (result.audioUrl) {
-          setIsAISpeaking(true);
-          await playAudio(result.audioUrl);
-          setIsAISpeaking(false);
-        }
+        // Speak the AI response in the background — never block the turn on TTS.
+        void speak(result.aiResponse);
 
         // Check completion — pass the live transcript (ref), not a stale closure.
         if (result.isComplete) {
@@ -240,7 +267,7 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
         setUseTextMode(true);
       }
     }
-  }, [isRecording, stopRecording, startRecording, sendResponse, playAudio]);
+  }, [isRecording, stopRecording, startRecording, sendResponse, speak, onInterviewComplete]);
 
   // Handle text input
   const handleTextSubmit = async () => {
@@ -266,18 +293,15 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
       const aiMessage: Message = {
         role: 'assistant',
         content: result.aiResponse,
-        audioUrl: result.audioUrl,
         feedbackHint: result.feedbackHint,
         timestamp: new Date()
       };
       setConversation(prev => [...prev, aiMessage]);
       setCurrentQuestion(result.currentQuestion);
 
-      // Play audio if available and voice enabled
-      if (voiceEnabled && result.audioUrl && !useTextMode) {
-        setIsAISpeaking(true);
-        await playAudio(result.audioUrl);
-        setIsAISpeaking(false);
+      // Speak in the background when in voice mode (never block on TTS).
+      if (voiceEnabled && !useTextMode) {
+        void speak(result.aiResponse);
       }
 
       if (result.isComplete) {

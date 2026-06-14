@@ -59,6 +59,7 @@ interface UseInterviewSessionReturn {
     totalQuestions: number,
     voiceEnabled: boolean
   ) => Promise<StartInterviewResult>;
+  synthesizeForPlayback: (text: string) => Promise<string | undefined>;
   sendResponse: (options: SendResponseOptions) => Promise<SendResponseResult>;
   endInterview: () => Promise<EndInterviewResult>;
   isLoading: boolean;
@@ -110,21 +111,13 @@ export const useInterviewSession = (
 
       setCurrentSessionId(result.session_id);
 
-      // Synthesize greeting audio if voice enabled
-      let audioUrl: string | undefined;
-      if (options.voiceEnabled) {
-        try {
-          const url = await synthesizeSpeech(result.greeting);
-          audioUrl = url || undefined;
-        } catch (ttsError) {
-          console.warn('TTS failed for greeting, continuing without audio:', ttsError);
-        }
-      }
-
+      // NOTE: greeting TTS is NOT synthesized here — that would block startup on
+      // a slow (up to 25s) synthesize call. The caller plays the greeting in the
+      // background via synthesizeForPlayback(). audioUrl is intentionally omitted.
       return {
         sessionId: result.session_id,
         greeting: result.greeting,
-        audioUrl,
+        audioUrl: undefined,
         totalQuestions: result.max_questions || 10,
       };
 
@@ -144,41 +137,48 @@ export const useInterviewSession = (
    * greeting + question count. Calling startInterview() again here would issue
    * a second /start, producing a divergent backend session record — so the
    * interview completes on one session while the report/dashboard read the
-   * other (status "pending" → report 400). This reuses the passed sessionId and
-   * only synthesizes the greeting for playback.
+   * other (status "pending" → report 400). This reuses the passed sessionId.
+   * Greeting TTS is played in the background by the caller (not synthesized
+   * here) so resume never blocks on a slow synthesize.
    */
   const resumeSession = useCallback(async (
     greeting: string,
     totalQuestions: number,
-    voiceEnabled: boolean
+    _voiceEnabled: boolean
   ): Promise<StartInterviewResult> => {
     setIsLoading(true);
     setError(null);
 
     try {
-      // Reuse the existing session id — no /start call.
+      // Reuse the existing session id — no /start call, no blocking TTS.
       setCurrentSessionId(sessionId);
-
-      let audioUrl: string | undefined;
-      if (voiceEnabled) {
-        try {
-          const url = await synthesizeSpeech(greeting);
-          audioUrl = url || undefined;
-        } catch (ttsError) {
-          console.warn('TTS failed for greeting (resume), continuing without audio:', ttsError);
-        }
-      }
-
       return {
         sessionId,
         greeting,
-        audioUrl,
+        audioUrl: undefined,
         totalQuestions,
       };
     } finally {
       setIsLoading(false);
     }
   }, [sessionId]);
+
+  /**
+   * Synthesize speech for background playback (best-effort).
+   * Returns a playable object URL, or undefined if TTS failed/timed out.
+   * Used by the panel to play audio WITHOUT blocking the conversation turn.
+   */
+  const synthesizeForPlayback = useCallback(async (
+    text: string
+  ): Promise<string | undefined> => {
+    try {
+      const url = await synthesizeSpeech(text);
+      return url || undefined;
+    } catch (ttsError) {
+      console.warn('TTS synthesis failed (background), continuing without audio:', ttsError);
+      return undefined;
+    }
+  }, []);
 
   /**
    * Send user response (voice or text)
@@ -205,21 +205,15 @@ export const useInterviewSession = (
       // Send response to get AI reply
       const result = await sendInterviewMessage(type, currentSessionId, userTranscript);
 
-      // Synthesize AI response audio
-      let audioUrl: string | undefined;
-      if (result.message) {
-        try {
-          const url = await synthesizeSpeech(result.message);
-          audioUrl = url || undefined;
-        } catch (ttsError) {
-          console.warn('TTS failed for response:', ttsError);
-        }
-      }
-
+      // NOTE: AI-response TTS is NOT synthesized here. Doing so awaited a
+      // slow (up to 25s) synthesize INSIDE the turn, so the user waited on TTS
+      // before the turn finished — and often got no audio anyway. The turn now
+      // returns immediately with text; the caller plays audio in the background
+      // via synthesizeForPlayback(). audioUrl is intentionally omitted.
       return {
         userTranscript,
         aiResponse: result.message,
-        audioUrl,
+        audioUrl: undefined,
         feedbackHint: undefined, // Standard interviews don't have feedbackHint in same format
         currentQuestion: result.question_number || 0,
         totalQuestions: result.total_questions || 0,
@@ -264,6 +258,7 @@ export const useInterviewSession = (
   return {
     startInterview,
     resumeSession,
+    synthesizeForPlayback,
     sendResponse,
     endInterview,
     isLoading,

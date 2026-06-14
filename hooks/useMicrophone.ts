@@ -44,7 +44,15 @@ function getSpeechRecognition(): (new () => SpeechRecognition) | null {
   return window.SpeechRecognition || (window as any).webkitSpeechRecognition || null;
 }
 
-export const useMicrophone = (): UseMicrophoneReturn => {
+export const useMicrophone = (
+  // Run the Web Speech API recognizer in parallel with MediaRecorder during
+  // recording. It opens its OWN mic capture, which contends with MediaRecorder
+  // and — especially late in a long session — can leave one side with an empty
+  // stream (header-only blobs / "audio-capture" errors). Callers that don't use
+  // the Web Speech transcript (e.g. InterviewVoicePanel) should pass `false` to
+  // keep MediaRecorder the sole mic consumer.
+  enableWebSpeechFallback: boolean = true
+): UseMicrophoneReturn => {
   const [status, setStatus] = useState<MicrophoneStatus>({
     available: false,
     permissionGranted: false
@@ -262,13 +270,17 @@ export const useMicrophone = (): UseMicrophoneReturn => {
       mediaRecorder.start(100); // Collect data every 100ms
       setIsRecording(true);
 
-      // Start Web Speech API in parallel as fallback STT
-      startWebSpeechRecognition();
+      // Start Web Speech API in parallel as fallback STT — only when enabled.
+      // Disabled callers keep MediaRecorder as the sole mic consumer (avoids
+      // the mic contention that produces empty recordings).
+      if (enableWebSpeechFallback) {
+        startWebSpeechRecognition();
+      }
 
     } catch (error) {
       throw new Error('Failed to start recording');
     }
-  }, [status.available, checkMicrophone, startWebSpeechRecognition]);
+  }, [status.available, checkMicrophone, startWebSpeechRecognition, enableWebSpeechFallback]);
 
   /**
    * Stop recording and return audio blob
