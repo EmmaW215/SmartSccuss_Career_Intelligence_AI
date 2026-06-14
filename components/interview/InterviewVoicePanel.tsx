@@ -85,8 +85,9 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
     startRecording,
     stopRecording,
     checkMicrophone,
+    resetMic,
     error: micError
-  } = useMicrophone(false);
+  } = useMicrophone(false, true);
 
   const {
     playAudio,
@@ -103,15 +104,22 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
     isLoading
   } = useInterviewSession(sessionId, interviewType);
 
+  // Serializes background TTS: each speak() claims a sequence id and bails if a
+  // newer one has started, so overlapping clips never fight over the single
+  // shared <audio> element (the source of repeated "Audio playback error").
+  const speakSeqRef = useRef(0);
+
   // Synthesize + play speech in the BACKGROUND so a slow/failed TTS never blocks
   // or delays a conversation turn. `isGreeting` routes an autoplay-blocked clip
   // to the tap-to-play button.
   const speak = useCallback(async (text: string, isGreeting = false) => {
     if (!text) return;
+    const myId = ++speakSeqRef.current;
+    stopAudio(); // halt any in-flight clip before this one
     const url = await synthesizeForPlayback(text);
-    if (!url || !isMountedRef.current) return;
+    // Bail if superseded by a newer speak(), or unmounted.
+    if (!url || !isMountedRef.current || myId !== speakSeqRef.current) return;
     try {
-      stopAudio(); // avoid overlapping clips if the user moved on quickly
       if (isMountedRef.current) setIsAISpeaking(true);
       await playAudio(url);
     } catch (playErr) {
@@ -193,9 +201,10 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
         const audioBlob = await stopRecording();
 
         // Guard empty / headers-only recordings (under ~1KB = no audible audio)
-        // before a network round-trip — these otherwise come back 422. Tell the
-        // user to retry instead of posting un-transcribable bytes.
+        // before a network round-trip — these otherwise come back 422. A tiny
+        // capture also signals a bad stream, so refresh it for the next attempt.
         if (!audioBlob || audioBlob.size < 1024) {
+          resetMic();
           setError("I didn't catch that — please try again.");
           return;
         }
@@ -254,6 +263,10 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
           }
           return updated;
         });
+        // Self-heal: drop the held mic stream so the NEXT recording acquires a
+        // fresh one. This recovers a persistent stream that has gone bad
+        // mid-session (the recurring >1KB-but-undecodable capture).
+        resetMic();
         setError(err instanceof Error ? err.message : 'Failed to process response');
       } finally {
         setIsProcessing(false);
@@ -261,13 +274,14 @@ export const InterviewVoicePanel: React.FC<InterviewVoicePanelProps> = ({
     } else {
       // Start recording
       try {
+        stopAudio(); // don't capture while a TTS clip is still playing
         await startRecording();
       } catch (err) {
         setError('Failed to start recording. Please check microphone permissions.');
         setUseTextMode(true);
       }
     }
-  }, [isRecording, stopRecording, startRecording, sendResponse, speak, onInterviewComplete]);
+  }, [isRecording, stopRecording, startRecording, sendResponse, speak, onInterviewComplete, resetMic, stopAudio]);
 
   // Handle text input
   const handleTextSubmit = async () => {
