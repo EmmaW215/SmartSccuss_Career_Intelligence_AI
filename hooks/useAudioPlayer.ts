@@ -35,7 +35,6 @@ export const useAudioPlayer = (options: UseAudioPlayerOptions = {}): UseAudioPla
   const [canAutoPlay, setCanAutoPlay] = useState(true);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioQueueRef = useRef<string[]>([]);
 
   // Initialize audio element
   useEffect(() => {
@@ -55,14 +54,9 @@ export const useAudioPlayer = (options: UseAudioPlayerOptions = {}): UseAudioPla
     audio.onended = () => {
       setIsPlaying(false);
       onPlayEnd?.();
-
-      // Play next in queue
-      if (audioQueueRef.current.length > 0) {
-        const nextUrl = audioQueueRef.current.shift();
-        if (nextUrl) {
-          playAudioInternal(nextUrl);
-        }
-      }
+      // NOTE: no auto-replay queue. Each clip is played once, latest-wins —
+      // a queue here previously cascaded older clips back into playback
+      // (the Voice-Mode "questions repeat on mic click" regression).
     };
 
     audio.ontimeupdate = () => {
@@ -134,42 +128,40 @@ export const useAudioPlayer = (options: UseAudioPlayerOptions = {}): UseAudioPla
   };
 
   /**
-   * Play audio from URL
+   * Play audio from URL.
+   *
+   * Single-shot, latest-wins: always plays exactly this clip. If the browser
+   * blocks autoplay, play() rejects and we rethrow so the caller can surface a
+   * tap-to-play affordance. We do NOT queue the clip (a queue previously
+   * cascaded older clips back into playback).
    */
   const playAudio = useCallback(async (url: string): Promise<void> => {
     const audio = audioRef.current;
     if (!audio) return;
 
     try {
-      // If autoplay not allowed, queue and show message
-      if (!canAutoPlay && autoPlay) {
-        audioQueueRef.current.push(url);
-        console.log('Autoplay blocked. Audio queued.');
-        return;
-      }
-
       await playAudioInternal(url);
     } catch (error) {
-      console.error('Audio play error:', error);
-      // Queue for later if blocked
-      audioQueueRef.current.push(url);
+      // Autoplay blocked / load interrupted — mark and rethrow; the caller
+      // decides what to do (e.g. show a "play greeting" button).
       setCanAutoPlay(false);
       throw error;
     }
-  }, [canAutoPlay, autoPlay]);
+  }, []);
 
   /**
-   * Stop audio playback
+   * Stop audio playback. Also detaches the "ready" handler so the just-stopped
+   * clip cannot be replayed: a leftover oncanplaythrough (from the last
+   * playAudioInternal) would otherwise re-fire on a seek and call play() again.
+   * The next playAudioInternal re-installs its own handler, so this is safe.
    */
   const stopAudio = useCallback(() => {
     const audio = audioRef.current;
     if (audio) {
       audio.pause();
-      audio.currentTime = 0;
+      audio.oncanplaythrough = null;
       setIsPlaying(false);
     }
-    // Clear queue
-    audioQueueRef.current = [];
   }, []);
 
   /**
